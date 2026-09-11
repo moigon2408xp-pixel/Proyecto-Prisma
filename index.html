@@ -1,0 +1,80 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PRISMA — Plataforma Resolutiva de Inteligencia y Seguimiento Multimodal Académico</title>
+  
+  <!-- PWA & Mobile Icons -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#00f0ff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <!-- Tipografías Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div id="prisma-app">
+    <!-- TOPBAR INSTITUCIONAL & ESTADO DEL CAMPUS UNICA -->
+    <header class="topbar">
+      <div class="brand-wrap">
+        <div class="brand-prism-logo">💎</div>
+        <div>
+          <h1 class="brand-title">P.R.I.S.M.A.</h1>
+          <p class="brand-sub">Asistente Multimodal Académico</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="campus-status-pill" id="campus-status-badge" title="Conexión en vivo con Moodle UNICA">
+          <span class="status-dot-pulse"></span>
+          <span id="campus-status-text">UNICA Conectado</span>
+        </div>
+        <button class="btn-prism btn-ghost" style="padding:6px 12px; font-size:12px;" onclick="syncCampusUnica()">
+          🔄 Sync
+        </button>
+      </div>
+    </header>
+
+    <!-- VISTA DINÁMICA DE PESTAÑAS (SPA) -->
+    <main id="view-container">
+      <!-- Se inyecta dinámicamente mediante app.js -->
+    </main>
+
+    <!-- BARRA INFERIOR DE NAVEGACIÓN PWA -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-tab="radar" onclick="switchTab('radar')">
+        <span class="nav-item-icon">📡</span>
+        <span>Radar</span>
+      </button>
+      <button class="nav-item" data-tab="studio" onclick="switchTab('studio')">
+        <span class="nav-item-icon">🎨</span>
+        <span>Estudio</span>
+      </button>
+      <button class="nav-item" data-tab="channels" onclick="switchTab('channels')">
+        <span class="nav-item-icon">💬</span>
+        <span>Canales</span>
+      </button>
+      <button class="nav-item" data-tab="security" onclick="switchTab('security')">
+        <span class="nav-item-icon">🛡️</span>
+        <span>Licencia</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal para Aprobación y Envío Human-in-the-loop -->
+  <div id="modal-review" class="modal-backdrop" style="display:none;">
+    <div class="modal-content" id="modal-review-body">
+      <!-- Contenido inyectado dinámicamente -->
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
