@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
    PROYECTO PRISMA â€“ ESTILOS DE VANGUARDIA (CYBER ACADEMIC DESIGN SYSTEM)
    Plataforma Resolutiva de Inteligencia y Seguimiento Multimodal AcadÃ©mico
    ========================================================================== */
@@ -430,3 +430,8 @@ body {
   overflow-y: auto;
 }
 
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
