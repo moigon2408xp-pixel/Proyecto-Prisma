@@ -1,80 +1,323 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PRISMA — Plataforma Resolutiva de Inteligencia y Seguimiento Multimodal Académico</title>
+  <script>
+    window.__ERRORS__ = [];
+    window.onerror = function(msg, url, line, col, error) {
+      window.__ERRORS__.push({ msg: msg, line: line, col: col, url: url, stack: error ? error.stack : '' });
+      document.title = "JSERROR: " + line + ": " + msg;
+    };
+  </script>
+
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <meta name="theme-color" content="#070a12"/>
+  <meta name="description" content="PRISMA - Plataforma Resolutiva de Inteligencia y Seguimiento Multimodal Académico"/>
+  <link rel="manifest" href="./manifest.webmanifest"/>
+  <link rel="icon" type="image/png" href="./icon-192.png"/>
+  <link rel="apple-touch-icon" href="./icon-512.png"/>
   
-  <!-- PWA & Mobile Icons -->
-  <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#00f0ff">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
-  <!-- Tipografías Google Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-
-  <link rel="stylesheet" href="styles.css">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome 6 y SweetAlert2 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  
+  <link rel="stylesheet" href="./styles.css"/>
+  <title>PRISMA — Asistente Académico</title>
+  
+  <!-- CSS crítico: oculta workspace ANTES de que corra cualquier JS -->
+  <style>
+    #workspace { display: none; }
+    #login-view { display: flex; }
+  </style>
 </head>
 <body>
+  <div class="app-shell">
 
-  <div id="prisma-app">
-    <!-- TOPBAR INSTITUCIONAL & ESTADO DEL CAMPUS UNICA -->
-    <header class="topbar">
-      <div class="brand-wrap">
-        <div class="brand-prism-logo">💎</div>
-        <div>
-          <h1 class="brand-title">P.R.I.S.M.A.</h1>
-          <p class="brand-sub">Asistente Multimodal Académico</p>
+    <!-- ========== PANTALLA DE LOGIN ========== -->
+    <section id="login-view" class="unlock-screen">
+
+      <!-- Fondo decorativo con gradiente PRISMA -->
+      <div class="login-bg-decor" aria-hidden="true">
+        <div class="login-bg-circle login-bg-circle--1"></div>
+        <div class="login-bg-circle login-bg-circle--2"></div>
+      </div>
+
+      <!-- Logo PRISMA -->
+      <div class="login-logo-wrapper">
+        <div class="prisma-logo">
+          <span class="prisma-logo-icon">💎</span>
         </div>
       </div>
 
-      <div class="topbar-actions">
-        <div class="campus-status-pill" id="campus-status-badge" title="Conexión en vivo con Moodle UNICA">
-          <span class="status-dot-pulse"></span>
-          <span id="campus-status-text">UNICA Conectado</span>
-        </div>
-        <button class="btn-prism btn-ghost" style="padding:6px 12px; font-size:12px;" onclick="syncCampusUnica()">
-          🔄 Sync
+      <!-- Nombre del sistema -->
+      <div class="login-brand">
+        <p class="login-brand-sub">Plataforma Resolutiva de Inteligencia</p>
+        <h1 class="login-brand-name">P.R.I.S.M.A.</h1>
+        <p class="login-brand-tag">Seguimiento Multimodal Académico</p>
+      </div>
+
+      <!-- Formulario de inicio de sesión -->
+      <form id="login-form" class="unlock-form">
+        <label for="login-name">Tu nombre</label>
+        <input
+          id="login-name"
+          autocomplete="username"
+          placeholder="Ej. Moisés"
+          required
+        />
+        <label for="login-pin">Tu PIN personal</label>
+        <input
+          id="login-pin"
+          type="password"
+          inputmode="numeric"
+          autocomplete="current-password"
+          placeholder="Seis dígitos"
+          required
+        />
+        <button type="submit" id="login-btn-manual" class="primary-button login-submit-btn">
+          Iniciar sesión
         </button>
+        <button type="button" class="secondary-button pwa-install-btn" onclick="if (window.triggerPwaInstall) window.triggerPwaInstall();" style="margin-top:10px; width:100%; border:1px solid #00f0ff; background:rgba(0,240,255,0.12); color:#00f0ff; font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;">
+          💻 Instalar App en esta Computadora
+        </button>
+        <p id="login-error" class="form-error"></p>
+      </form>
+
+      <p class="login-footer-copy">
+        © PRISMA · Asistente Académico Inteligente
+      </p>
+    </section>
+
+    <!-- ========== ÁREA DE TRABAJO ========== -->
+    <section id="workspace" class="workspace">
+      <!-- HEADER FLOTANTE STICKY -->
+      <header class="prisma-main-header">
+        <a class="prisma-header-brand" onclick="navigate('modules')">
+          <div class="prisma-brand-logo">💎</div>
+          <div>
+            <div class="prisma-brand-title">PRISMA</div>
+            <div class="prisma-brand-sub">Asistente Académico</div>
+          </div>
+        </a>
+
+        <div class="prisma-header-controls">
+          <!-- Botón Sincronizar Campus -->
+          <button type="button" class="secondary-button" onclick="syncCampus()" style="background:#10b981; color:white; border:none; padding:7px 14px; border-radius:30px; font-weight:800; font-size:12px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; box-shadow:0 3px 10px rgba(16,185,129,0.35);">
+            <i class="fas fa-sync-alt"></i> <span>Sync Campus</span>
+          </button>
+
+          <!-- Campanita de Alertas -->
+          <div class="bell-container" id="bellContainer">
+            <button type="button" class="control-btn-circle" id="bellIconBtn" title="Alertas Académicas">
+              <i class="fas fa-bell bell-icon" id="bellIcon"></i>
+              <span class="bell-badge" id="bellBadge">0</span>
+            </button>
+            <div class="dropdown-notif" id="notifDropdown">
+              <div class="dropdown-notif-header">
+                <span><i class="fas fa-exclamation-circle"></i> Alertas Académicas</span>
+                <span id="notif-count-text" style="font-weight:700; font-size:11px;">0 activas</span>
+              </div>
+              <div class="notif-list" id="notifList">
+                <div style="padding:20px; text-align:center; color:var(--text-muted); font-size:12px;">
+                  <i class="fas fa-check-circle" style="color:#10b981; font-size:2rem; margin-bottom:8px;"></i><br/>
+                  Todo al día. No hay alertas académicas críticas.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Buscador Inteligente Spotlight -->
+          <button type="button" id="searchToggleBtn" class="control-btn-circle" title="Buscador Spotlight (Ctrl + K)">
+            <i class="fas fa-search"></i>
+          </button>
+
+          <!-- Botón Modo Oscuro / Claro -->
+          <button type="button" id="themeToggleBtn" class="control-btn-circle" onclick="toggleTheme()" title="Cambiar Tema">
+            <i class="fas fa-moon" id="themeIcon"></i>
+          </button>
+
+          <!-- Botón Guía -->
+          <button type="button" class="control-btn-circle" onclick="openGuideModal()" title="Guía de Uso">
+            <i class="fas fa-graduation-cap" style="color:#3b82f6;"></i>
+          </button>
+
+          <!-- Botón Refrescar -->
+          <button type="button" id="refresh" class="control-btn-circle" title="Actualizar datos">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+
+          <!-- Perfil Usuario -->
+          <button type="button" class="user-pill" id="userPillBtn" title="Perfil activo">
+            <i class="fas fa-user"></i>
+            <span id="userPillName">Usuario</span>
+          </button>
+
+          <!-- Botón Salir -->
+          <button type="button" class="logout-btn-new" onclick="doLogout()" title="Cerrar sesión">
+            <i class="fas fa-power-off"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Fichas y Módulos de Navegación PRISMA -->
+      <nav id="prisma-module-tabs" class="prisma-module-tabs-bar">
+        <button type="button" class="prisma-tab-btn active" data-screen="modules" onclick="navigate('modules')">
+          <i class="fas fa-th-large"></i> <span>Módulos</span>
+        </button>
+        <button type="button" class="prisma-tab-btn" data-screen="radar" onclick="navigate('radar')">
+          <i class="fas fa-satellite-dish"></i> <span>Radar</span> <span class="tab-badge" id="tabBadgeRadar">0</span>
+        </button>
+        <button type="button" class="prisma-tab-btn" data-screen="studio" onclick="navigate('studio')">
+          <i class="fas fa-palette"></i> <span>Estudio</span>
+        </button>
+        <button type="button" class="prisma-tab-btn" data-screen="calendar" onclick="navigate('calendar')">
+          <i class="fas fa-calendar-alt"></i> <span>Calendario</span>
+        </button>
+        <button type="button" class="prisma-tab-btn" data-screen="channels" onclick="navigate('channels')">
+          <i class="fas fa-comments"></i> <span>Canales</span>
+        </button>
+        <button type="button" class="prisma-tab-btn" data-screen="courses" onclick="navigate('courses')">
+          <i class="fas fa-book"></i> <span>Materias</span>
+        </button>
+        <button type="button" class="prisma-tab-btn" data-screen="settings" onclick="navigate('settings')">
+          <i class="fas fa-cog"></i> <span>Ajustes</span>
+        </button>
+      </nav>
+
+      <!-- Copia de Seguridad -->
+      <div class="backup-container">
+        <button type="button" onclick="exportarBackup()">
+          📦 Exportar Copia de Seguridad
+        </button>
+        <label>
+          📥 Importar Copia de Seguridad
+          <input
+            type="file"
+            id="importInput"
+            accept=".json"
+            onchange="importarBackup(event)"
+            style="display:none;"
+          />
+        </label>
       </div>
-    </header>
 
-    <!-- VISTA DINÁMICA DE PESTAÑAS (SPA) -->
-    <main id="view-container">
-      <!-- Se inyecta dinámicamente mediante app.js -->
-    </main>
+      <main id="screen" class="screen" aria-live="polite"></main>
 
-    <!-- BARRA INFERIOR DE NAVEGACIÓN PWA -->
-    <nav class="bottom-nav">
-      <button class="nav-item active" data-tab="radar" onclick="switchTab('radar')">
-        <span class="nav-item-icon">📡</span>
-        <span>Radar</span>
-      </button>
-      <button class="nav-item" data-tab="studio" onclick="switchTab('studio')">
-        <span class="nav-item-icon">🎨</span>
-        <span>Estudio</span>
-      </button>
-      <button class="nav-item" data-tab="channels" onclick="switchTab('channels')">
-        <span class="nav-item-icon">💬</span>
-        <span>Canales</span>
-      </button>
-      <button class="nav-item" data-tab="security" onclick="switchTab('security')">
-        <span class="nav-item-icon">🛡️</span>
-        <span>Licencia</span>
-      </button>
-    </nav>
+      <nav id="app-nav" class="bottom-nav">
+        <button data-screen="radar"    class="nav-button active"><span>�</span>Radar</button>
+        <button data-screen="studio"   class="nav-button"><span>🎨</span>Estudio</button>
+        <button data-screen="calendar" class="nav-button"><span>📅</span>Calendario</button>
+        <button data-screen="courses"  class="nav-button"><span>📚</span>Materias</button>
+        <button data-screen="settings" class="nav-button"><span>⚙</span>Ajustes</button>
+      </nav>
+    </section>
   </div>
 
-  <!-- Modal para Aprobación y Envío Human-in-the-loop -->
-  <div id="modal-review" class="modal-backdrop" style="display:none;">
-    <div class="modal-content" id="modal-review-body">
-      <!-- Contenido inyectado dinámicamente -->
+  <dialog id="modal" class="modal"></dialog>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="./app.js"></script>
+
+  <script>
+    /* ---- PWA y Registro de Service Worker ---- */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('./sw.js').then(function(reg) {
+          console.log('SW PRISMA registrado:', reg.scope);
+        }).catch(function(err) {
+          console.warn('Error al registrar SW:', err);
+        });
+      });
+    }
+
+    window.deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      window.deferredInstallPrompt = e;
+      document.querySelectorAll('.pwa-install-btn').forEach(function(b) {
+        b.style.display = 'flex';
+      });
+    });
+
+    window.addEventListener('appinstalled', function() {
+      window.deferredInstallPrompt = null;
+      console.log('PRISMA instalada como App.');
+    });
+
+    window.triggerPwaInstall = async function() {
+      if (window.deferredInstallPrompt) {
+        window.deferredInstallPrompt.prompt();
+        const choice = await window.deferredInstallPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          console.log('Instalación aceptada.');
+        }
+        window.deferredInstallPrompt = null;
+      } else {
+        alert('Para instalar PRISMA como App en tu computadora:\n\n1. En Google Chrome o Microsoft Edge, busca el ícono de instalación (una pantalla pequeña con flecha hacia abajo) a la derecha en la barra de direcciones.\n2. O pulsa el menú del navegador (los 3 puntos ⋮ arriba a la derecha) y haz clic en "Instalar PRISMA".');
+      }
+    };
+
+    /* ---- Backup / Restore desde localStorage ---- */
+    window.exportarBackup = function () {
+      const datos = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const clave = localStorage.key(i);
+        datos[clave] = localStorage.getItem(clave);
+      }
+      if (!Object.keys(datos).length) {
+        alert("No hay datos guardados para exportar.");
+        return;
+      }
+      const blob = new Blob([JSON.stringify(datos, null, 2)], { type: "application/json" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `backup_prisma_${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    window.importarBackup = function (event) {
+      const archivo = event.target.files[0];
+      if (!archivo) return;
+      const lector = new FileReader();
+      lector.onload = function (e) {
+        try {
+          const datos = JSON.parse(e.target.result);
+          for (const k in datos) localStorage.setItem(k, datos[k]);
+          alert("¡Copia restaurada! La página se actualizará.");
+          window.location.reload();
+        } catch {
+          alert("El archivo no es un JSON válido.");
+        }
+      };
+      lector.readAsText(archivo);
+    };
+  </script>
+
+  <!-- =========================================================
+       PALETA DE COMANDOS GLOBAL (SPOTLIGHT)
+       ========================================================= -->
+  <div id="prisma-spotlight-overlay">
+    <div class="spotlight-box">
+      <div class="spotlight-header">
+        <i class="fas fa-search"></i>
+        <input type="text" id="spotlight-search" class="spotlight-input" placeholder="¿Qué deseas buscar o hacer? (tareas, materias, acciones)..." autocomplete="off" spellcheck="false">
+      </div>
+      <div class="spotlight-results" id="spotlight-list">
+        <!-- Inyectado dinámicamente -->
+      </div>
+      <div class="spotlight-footer">
+        <span><span class="kbd-btn"><i class="fas fa-arrow-up"></i></span> <span class="kbd-btn"><i class="fas fa-arrow-down"></i></span> Navegar</span>
+        <span><span class="kbd-btn">Enter</span> Seleccionar</span>
+        <span><span class="kbd-btn">Esc</span> Cerrar</span>
+      </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
 </body>
 </html>
