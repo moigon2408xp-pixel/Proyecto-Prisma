@@ -1,845 +1,1060 @@
 /**
  * ============================================================================
- * PROYECTO PRISMA — ASISTENTE MULTIMODAL ACADÉMICO (v2.0)
+ * PROYECTO PRISMA — FRONTEND ACTUALIZADO (v3.0)
  * Plataforma Resolutiva de Inteligencia y Seguimiento Multimodal Académico
- * Motor de IA Generativa (Google Gemini) + Parser Local + Sincronización UNICA
+ * Basado en la arquitectura exitosa de Creaciones JJ
  * ============================================================================
  */
 
-// Configuración de Conexión Campus UNICA
-const UNICA_CONFIG = {
-  baseUrl: 'https://campus.unica.edu.ve',
-  tokenEndpoint: 'https://campus.unica.edu.ve/login/token.php',
-  service: 'moodle_mobile_app',
-  currentUserId: 580
-};
-
-// Estado Global de PRISMA
-const state = {
-  currentTab: 'studio', // Iniciamos en Estudio para que pruebe la IA de inmediato
-  apiKey: localStorage.getItem('prisma_gemini_key') || '',
-  student: {
+// ============================================================================
+// CONFIGURACIÓN DEL SISTEMA
+// ============================================================================
+const PRISMA_CONFIG = {
+  API_URL: localStorage.getItem('prisma_api_url') || '', // Se configurará en ajustes
+  CAMPUS_URL: 'https://campus.unica.edu.ve',
+  STUDENT_INFO: {
     name: 'Moisés González',
     cedula: 'V-31.171.020',
     id: 580,
     university: 'Universidad Católica Cecilio Acosta (UNICA)',
     faculty: 'Facultad de Ciencias de la Comunicación y de la Información',
-    school: 'Escuela de Comunicación Social y Diseño Gráfico',
-    campusUrl: UNICA_CONFIG.baseUrl
-  },
-  courses: [
-    {
-      id: 14739,
-      name: 'TALLER DE IMAGEN CORPORATIVA',
-      code: 'TIC-14739',
-      periodo: '2026-II',
-      profesor: 'Prof. María Andreína',
-      status: 'Inscrita (Activa en UNICA)',
-      color: '#00f0ff'
-    }
-  ],
-  // Tareas en el radar: Se cargan desde localStorage o inician vacías (realistas con UNICA)
-  assignments: JSON.parse(localStorage.getItem('prisma_assignments')) || [],
-  
-  // Último trabajo analizado y generado por la IA en el Estudio
-  activeGeneratedWork: null,
-
-  license: {
-    hwid: localStorage.getItem('prisma_hwid') || generateHardwareId(),
-    licenseKey: localStorage.getItem('prisma_license_key') || 'PRISMA-MASTER-MOISES-2026',
-    plan: 'Master Developer (Moisés González)',
-    isAuthorized: true
+    school: 'Escuela de Comunicación Social y Diseño Gráfico'
   }
+};
+
+// ============================================================================
+// ESTADO GLOBAL
+// ============================================================================
+const state = {
+  // Sesión de usuario
+  session: JSON.parse(localStorage.getItem('prisma_session')) || null,
+  
+  // Datos académicos
+  materias: JSON.parse(localStorage.getItem('prisma_materias')) || [],
+  tareas: JSON.parse(localStorage.getItem('prisma_tareas')) || [],
+  calendario: JSON.parse(localStorage.getItem('prisma_calendario')) || [],
+  canales: JSON.parse(localStorage.getItem('prisma_canales')) || [],
+  configuracion: JSON.parse(localStorage.getItem('prisma_configuracion')) || {},
+  
+  // Estado de la interfaz
+  currentScreen: 'modules',
+  theme: localStorage.getItem('prisma_theme') || 'dark',
+  
+  // Generación con IA
+  apiKey: localStorage.getItem('prisma_gemini_key') || '',
+  activeGeneratedWork: null,
+  
+  // Filtros y búsqueda
+  searchQuery: '',
+  filterPriority: 'all',
+  filterStatus: 'all'
 };
 
 // ============================================================================
 // INICIALIZACIÓN
 // ============================================================================
 document.addEventListener('DOMContentLoaded', () => {
-  renderCurrentTab();
-  registerServiceWorker();
-  validateDeviceLicense();
+  initializeApp();
 });
 
-function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(console.warn);
+function initializeApp() {
+  // Aplicar tema
+  applyTheme(state.theme);
+  
+  // Verificar sesión
+  if (state.session) {
+    showWorkspace();
+    loadDashboardData();
+  } else {
+    showLogin();
+  }
+  
+  // Configurar event listeners
+  setupEventListeners();
+  
+  // Iniciar atajos de teclado
+  setupKeyboardShortcuts();
+}
+
+function setupEventListeners() {
+  // Login form
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', handleLogin);
+  }
+  
+  // Refresh button
+  const refreshBtn = document.getElementById('refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      loadDashboardData();
+      showToast('Datos actualizados');
+    });
+  }
+  
+  // Bell notifications
+  const bellBtn = document.getElementById('bellIconBtn');
+  if (bellBtn) {
+    bellBtn.addEventListener('click', toggleNotifications);
+  }
+  
+  // Search toggle
+  const searchBtn = document.getElementById('searchToggleBtn');
+  if (searchBtn) {
+    searchBtn.addEventListener('click', toggleSpotlight);
+  }
+  
+  // Bottom navigation
+  document.querySelectorAll('.nav-button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screen = btn.getAttribute('data-screen');
+      navigate(screen);
+    });
+  });
+  
+  // Module tabs
+  document.querySelectorAll('.prisma-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screen = btn.getAttribute('data-screen');
+      navigate(screen);
+    });
+  });
+}
+
+function setupKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    // Ctrl/Cmd + K para spotlight
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      toggleSpotlight();
+    }
+    
+    // Escape para cerrar modales
+    if (e.key === 'Escape') {
+      closeAllModals();
+    }
+  });
+}
+
+// ============================================================================
+// GESTIÓN DE SESIÓN
+// ============================================================================
+function showLogin() {
+  document.getElementById('login-view').style.display = 'flex';
+  document.getElementById('workspace').style.display = 'none';
+}
+
+function showWorkspace() {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('workspace').style.display = 'flex';
+  updateUserPill();
+}
+
+function handleLogin(e) {
+  e.preventDefault();
+  
+  const name = document.getElementById('login-name').value.trim();
+  const pin = document.getElementById('login-pin').value.trim();
+  
+  if (!name || !pin) {
+    showLoginError('Nombre y PIN son requeridos');
+    return;
+  }
+  
+  // Simular login (en producción, llamar a la API)
+  if (PRISMA_CONFIG.API_URL) {
+    // Login con backend
+    fetch(PRISMA_CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'prisma_login',
+        name: name,
+        pin: pin
+      })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.ok && data.exito) {
+        state.session = data.session;
+        localStorage.setItem('prisma_session', JSON.stringify(state.session));
+        showWorkspace();
+        loadDashboardData();
+      } else {
+        showLoginError(data.mensaje || 'Error en login');
+      }
+    })
+    .catch(err => {
+      console.error('Error en login:', err);
+      showLoginError('Error de conexión. Usando modo local.');
+      // Fallback a modo local
+      performLocalLogin(name, pin);
+    });
+  } else {
+    // Modo local (sin backend configurado)
+    performLocalLogin(name, pin);
   }
 }
 
-function generateHardwareId() {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.textBaseline = 'top';
-  ctx.font = '14px Arial';
-  ctx.fillStyle = '#f60';
-  ctx.fillRect(125, 1, 62, 20);
-  ctx.fillStyle = '#069';
-  ctx.fillText('PRISMA-HWID-MOISES', 2, 15);
-  const b64 = canvas.toDataURL();
-  let hash = 0;
-  for (let i = 0; i < b64.length; i++) {
-    hash = ((hash << 5) - hash) + b64.charCodeAt(i);
-    hash |= 0;
-  }
-  const screenSpec = `${window.screen.width}x${window.screen.height}_${navigator.hardwareConcurrency || 4}`;
-  const hwid = `PRISMA-HWID-${Math.abs(hash).toString(16).toUpperCase()}-${screenSpec}`;
-  localStorage.setItem('prisma_hwid', hwid);
-  return hwid;
+function performLocalLogin(name, pin) {
+  // Login local simplificado para desarrollo
+  state.session = {
+    name: name,
+    role: 'administrador',
+    token: 'local-' + Date.now()
+  };
+  localStorage.setItem('prisma_session', JSON.stringify(state.session));
+  showWorkspace();
+  loadDashboardData();
+  showToast('Sesión iniciada en modo local');
 }
 
-function validateDeviceLicense() {
-  const reg = localStorage.getItem('prisma_registered_hwid');
-  if (!reg) localStorage.setItem('prisma_registered_hwid', state.license.hwid);
+function showLoginError(message) {
+  const errorEl = document.getElementById('login-error');
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+  }
+}
+
+function doLogout() {
+  Swal.fire({
+    title: '¿Cerrar sesión?',
+    text: '¿Estás seguro de que deseas salir?',
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#00f0ff',
+    cancelButtonColor: '#64748b',
+    confirmButtonText: 'Sí, salir',
+    cancelButtonText: 'Cancelar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      state.session = null;
+      localStorage.removeItem('prisma_session');
+      showLogin();
+      showToast('Sesión cerrada');
+    }
+  });
+}
+
+function updateUserPill() {
+  const nameEl = document.getElementById('userPillName');
+  if (nameEl && state.session) {
+    nameEl.textContent = state.session.name || 'Usuario';
+  }
 }
 
 // ============================================================================
 // NAVEGACIÓN SPA
 // ============================================================================
-function switchTab(tabId) {
-  state.currentTab = tabId;
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+function navigate(screen) {
+  state.currentScreen = screen;
+  
+  // Actualizar tabs de módulos
+  document.querySelectorAll('.prisma-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-screen') === screen);
   });
-  renderCurrentTab();
+  
+  // Actualizar navegación inferior
+  document.querySelectorAll('.nav-button').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-screen') === screen);
+  });
+  
+  // Renderizar pantalla correspondiente
+  renderScreen(screen);
+  
+  // Scroll al inicio
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function renderCurrentTab() {
-  const container = document.getElementById('view-container');
+function renderScreen(screen) {
+  const container = document.getElementById('screen');
   if (!container) return;
-
-  switch (state.currentTab) {
+  
+  switch (screen) {
+    case 'modules':
+      renderModulesScreen(container);
+      break;
     case 'radar':
-      renderRadarView(container);
+      renderRadarScreen(container);
       break;
     case 'studio':
-      renderStudioView(container);
+      renderStudioScreen(container);
+      break;
+    case 'calendar':
+      renderCalendarScreen(container);
       break;
     case 'channels':
-      renderChannelsView(container);
+      renderChannelsScreen(container);
       break;
-    case 'security':
-      renderSecurityView(container);
+    case 'courses':
+      renderCoursesScreen(container);
+      break;
+    case 'settings':
+      renderSettingsScreen(container);
       break;
     default:
-      renderStudioView(container);
+      renderModulesScreen(container);
   }
 }
 
 // ============================================================================
-// 1. VISTA RADAR ACADÉMICO (SINCERADO CON EL CAMPUS UNICA)
+// PANTALLA DE MÓDULOS
 // ============================================================================
-function renderRadarView(container) {
-  const currentCourse = state.courses[0];
-  const activeCount = state.assignments.filter(a => a.status !== 'submitted').length;
-
+function renderModulesScreen(container) {
+  const pendingTasks = state.tareas.filter(t => t.estado === 'Pendiente').length;
+  const urgentTasks = state.tareas.filter(t => {
+    if (!t.fecha_entrega) return false;
+    const daysUntilDue = Math.ceil((new Date(t.fecha_entrega) - new Date()) / (1000 * 60 * 60 * 24));
+    return daysUntilDue <= 3 && t.estado !== 'Entregada';
+  }).length;
+  
   container.innerHTML = `
-    <!-- Banner de Materia Activa en UNICA -->
-    <div class="materia-banner">
-      <div>
-        <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:700; letter-spacing:0.5px;">
-          Materia Inscrita en UNICA · Periodo Activo
+    <div class="modules-grid">
+      <!-- Tarjeta Radar -->
+      <div class="module-card" onclick="navigate('radar')">
+        <div class="module-card-icon" style="background: rgba(0,240,255,0.15); color: #00f0ff;">
+          <i class="fas fa-satellite-dish"></i>
         </div>
-        <div class="materia-title">${escapeHtml(currentCourse.name)}</div>
-        <div class="materia-code">Código: ${currentCourse.code} · ID Curso: ${currentCourse.id} · ${currentCourse.profesor}</div>
-      </div>
-      <div style="text-align:right;">
-        <span class="pill-tag" style="background:rgba(0,240,255,0.15); color:var(--cyan-neon); font-weight:700;">
-          ${currentCourse.status}
-        </span>
-        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
-          + Nuevas materias al inscribir
-        </div>
-      </div>
-    </div>
-
-    <!-- Radar de Asignaciones -->
-    <div class="glass-card">
-      <div class="card-title-row">
-        <h2 class="card-title">
-          <span>📡 Radar de Asignaciones & Evaluaciones</span>
-        </h2>
-        <div style="display:flex; gap:8px;">
-          <button class="btn-prism btn-ghost" style="font-size:11px; padding:4px 10px;" onclick="openManualTaskModal()">
-            + Nueva Tarea Manual
-          </button>
-        </div>
-      </div>
-
-      ${activeCount === 0 ? `
-        <div style="text-align:center; padding:35px 20px; background:rgba(0,0,0,0.25); border-radius:12px; border:1px dashed rgba(255,255,255,0.1); margin:12px 0;">
-          <div style="font-size:32px; margin-bottom:10px;">🏛️</div>
-          <div style="font-weight:700; font-size:15px; color:#fff; margin-bottom:4px;">
-            Moodle UNICA al día: 0 tareas publicadas por los profesores
+        <div class="module-card-content">
+          <h3>Radar Académico</h3>
+          <p>Monitoreo de tareas y prioridades</p>
+          <div class="module-card-stats">
+            <span class="stat-badge">${pendingTasks} pendientes</span>
+            <span class="stat-badge urgent">${urgentTasks} urgentes</span>
           </div>
-          <p style="font-size:12.5px; color:var(--text-muted); max-width:440px; margin:0 auto 16px auto; line-height:1.5;">
-            Tu profesor aún no ha cargado asignaciones en el campus virtual. Puedes usar el <strong>Estudio</strong> para redactar o diseñar cualquier trabajo a partir de consignas de clase o WhatsApp.
-          </p>
-          <button class="btn-prism btn-primary-cyan" onclick="switchTab('studio')">
-            🎨 Ir al Estudio y Generar una Tarea Ahora
-          </button>
         </div>
-      ` : `
-        <div class="tasks-list">
-          ${state.assignments.map(a => renderTaskCard(a)).join('')}
+      </div>
+      
+      <!-- Tarjeta Estudio -->
+      <div class="module-card" onclick="navigate('studio')">
+        <div class="module-card-icon" style="background: rgba(147,51,234,0.15); color: #9333ea;">
+          <i class="fas fa-palette"></i>
         </div>
-      `}
-    </div>
-  `;
-}
-
-function renderTaskCard(assignment) {
-  const isReady = assignment.status === 'ready_review';
-  const isSubmitted = assignment.status === 'submitted';
-  const diffHours = Math.round((new Date(assignment.deadline) - new Date()) / (1000 * 3600));
-  const diffDays = Math.floor(diffHours / 24);
-
-  return `
-    <div class="task-card ${isReady ? 'ready' : ''}">
-      <div class="task-header">
-        <h3 class="task-title">${escapeHtml(assignment.title)}</h3>
-        <span class="countdown-badge">
-          ⏳ ${diffDays > 0 ? `${diffDays}d ${diffHours % 24}h restantes` : `${diffHours}h restantes`}
-        </span>
+        <div class="module-card-content">
+          <h3>Estudio Multimodal</h3>
+          <p>Generación de entregables con IA</p>
+          <div class="module-card-stats">
+            <span class="stat-badge">Motor Gemini ${state.apiKey ? '✓' : '○'}</span>
+          </div>
+        </div>
       </div>
-
-      <p class="task-details">${escapeHtml(assignment.description)}</p>
-
-      <div class="task-tags">
-        ${(assignment.formats || ['PDF']).map(f => `<span class="pill-tag ${f.toLowerCase()}">${f}</span>`).join('')}
-        ${isReady ? `
-          <span class="pill-tag" style="background:rgba(16,185,129,0.2); color:var(--emerald-success); font-weight:700;">
-            ✓ Entregables Listos
-          </span>
-        ` : `
-          <span class="pill-tag" style="background:rgba(245,158,11,0.2); color:var(--amber-warning);">
-            ⏳ En Proceso
-          </span>
-        `}
+      
+      <!-- Tarjeta Calendario -->
+      <div class="module-card" onclick="navigate('calendar')">
+        <div class="module-card-icon" style="background: rgba(16,185,129,0.15); color: #10b981;">
+          <i class="fas fa-calendar-alt"></i>
+        </div>
+        <div class="module-card-content">
+          <h3>Calendario Académico</h3>
+          <p>Gestión de fechas y recordatorios</p>
+          <div class="module-card-stats">
+            <span class="stat-badge">${state.calendario.length} eventos</span>
+          </div>
+        </div>
       </div>
-
-      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-        <button class="btn-prism btn-approve-submit" onclick="openApprovalModal('${assignment.id}')">
-          👁️ Revisar & Descargar Archivos
-        </button>
+      
+      <!-- Tarjeta Materias -->
+      <div class="module-card" onclick="navigate('courses')">
+        <div class="module-card-icon" style="background: rgba(245,158,11,0.15); color: #f59e0b;">
+          <i class="fas fa-book"></i>
+        </div>
+        <div class="module-card-content">
+          <h3>Materias Inscritas</h3>
+          <p>Gestión de cursos y profesores</p>
+          <div class="module-card-stats">
+            <span class="stat-badge">${state.materias.length} materias</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Tarjeta Canales -->
+      <div class="module-card" onclick="navigate('channels')">
+        <div class="module-card-icon" style="background: rgba(236,72,153,0.15); color: #ec4899;">
+          <i class="fas fa-comments"></i>
+        </div>
+        <div class="module-card-content">
+          <h3>Canales de Mensajería</h3>
+          <p>Integración WhatsApp/Telegram</p>
+          <div class="module-card-stats">
+            <span class="stat-badge">${state.canales.length} canales</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Tarjeta Ajustes -->
+      <div class="module-card" onclick="navigate('settings')">
+        <div class="module-card-icon" style="background: rgba(100,116,139,0.15); color: #64748b;">
+          <i class="fas fa-cog"></i>
+        </div>
+        <div class="module-card-content">
+          <h3>Ajustes del Sistema</h3>
+          <p>Configuración y preferencias</p>
+          <div class="module-card-stats">
+            <span class="stat-badge">Configurar</span>
+          </div>
+        </div>
       </div>
     </div>
   `;
 }
 
 // ============================================================================
-// 2. VISTA ESTUDIO MULTIMODAL (MOTOR REAL DE INTELIGENCIA ARTIFICIAL)
+// PANTALLA RADAR
 // ============================================================================
-function renderStudioView(container) {
-  const hasKey = !!state.apiKey;
-
+function renderRadarScreen(container) {
+  const filteredTasks = filterTasks(state.tareas);
+  
   container.innerHTML = `
-    <div class="glass-card">
-      <div class="card-title-row">
-        <h2 class="card-title">🎨 Estudio Multimodal de Generación</h2>
-        <button class="btn-prism btn-ghost" style="font-size:11px; padding:4px 10px;" onclick="toggleApiKeyInput()">
-          🔑 ${hasKey ? 'IA Conectada' : 'Conectar Clave Gemini'}
+    <div class="screen-header">
+      <h2>📡 Radar Académico</h2>
+      <button class="secondary-button" onclick="openNewTaskModal()">
+        <i class="fas fa-plus"></i> Nueva Tarea
+      </button>
+    </div>
+    
+    <div class="filters-bar">
+      <select class="filter-select" onchange="state.filterPriority = this.value; renderScreen('radar');">
+        <option value="all">Todas las prioridades</option>
+        <option value="Alta" ${state.filterPriority === 'Alta' ? 'selected' : ''}>Alta prioridad</option>
+        <option value="Media" ${state.filterPriority === 'Media' ? 'selected' : ''}>Media prioridad</option>
+        <option value="Baja" ${state.filterPriority === 'Baja' ? 'selected' : ''}>Baja prioridad</option>
+      </select>
+      
+      <select class="filter-select" onchange="state.filterStatus = this.value; renderScreen('radar');">
+        <option value="all">Todos los estados</option>
+        <option value="Pendiente" ${state.filterStatus === 'Pendiente' ? 'selected' : ''}>Pendientes</option>
+        <option value="En_Proceso" ${state.filterStatus === 'En_Proceso' ? 'selected' : ''}>En proceso</option>
+        <option value="Entregada" ${state.filterStatus === 'Entregada' ? 'selected' : ''}>Entregadas</option>
+      </select>
+    </div>
+    
+    ${filteredTasks.length === 0 ? `
+      <div class="empty-state">
+        <i class="fas fa-satellite-dish" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+        <h3>No hay tareas en el radar</h3>
+        <p>Agrega tu primera tarea o sincroniza con el campus universitario</p>
+        <button class="primary-button" onclick="openNewTaskModal()" style="margin-top: 1rem;">
+          Agregar Tarea Manual
         </button>
       </div>
+    ` : `
+      <div class="tasks-list">
+        ${filteredTasks.map(task => renderTaskCard(task)).join('')}
+      </div>
+    `}
+  `;
+  
+  updateBadge('tabBadgeRadar', filteredTasks.filter(t => t.estado === 'Pendiente').length);
+}
 
-      <!-- Configuración de Clave Gemini (Colapsable o visible si no hay clave) -->
-      <div id="gemini-key-box" style="display:${hasKey ? 'none' : 'block'}; background:rgba(0,240,255,0.06); border:1px solid rgba(0,240,255,0.25); border-radius:8px; padding:12px; margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <label style="font-size:12px; font-weight:700; color:var(--cyan-neon);">
-            ⚡ Conectar Google Gemini (Para Investigación Profunda y Generación Real):
-          </label>
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" style="font-size:11px; color:#38bdf8; text-decoration:underline;">
-            Obtener clave gratis aquí ↗
-          </a>
+function filterTasks(tasks) {
+  return tasks.filter(task => {
+    if (state.filterPriority !== 'all' && task.prioridad !== state.filterPriority) return false;
+    if (state.filterStatus !== 'all' && task.estado !== state.filterStatus) return false;
+    if (state.searchQuery && !task.titulo.toLowerCase().includes(state.searchQuery.toLowerCase())) return false;
+    return true;
+  });
+}
+
+function renderTaskCard(task) {
+  const daysUntilDue = task.fecha_entrega ? 
+    Math.ceil((new Date(task.fecha_entrega) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+  
+  const urgencyClass = daysUntilDue !== null ? 
+    (daysUntilDue <= 2 ? 'urgent' : daysUntilDue <= 5 ? 'warning' : 'normal') : 'normal';
+  
+  const statusColors = {
+    'Pendiente': '#f59e0b',
+    'En_Proceso': '#3b82f6',
+    'Lista_Entregada': '#10b981',
+    'Entregada': '#64748b',
+    'Calificada': '#8b5cf6'
+  };
+  
+  return `
+    <div class="task-card" onclick="openTaskDetailModal('${task.id}')">
+      <div class="task-header">
+        <div class="task-priority ${urgencyClass}"></div>
+        <div class="task-info">
+          <h3>${escapeHtml(task.titulo)}</h3>
+          <p class="task-subtitle">${escapeHtml(task.materia_nombre || 'Sin materia')}</p>
         </div>
-        <div style="display:flex; gap:8px;">
-          <input type="password" id="gemini-api-key-input" value="${state.apiKey}" placeholder="Pega tu clave gratuita de Google AI Studio (AIzaSy...)" style="flex:1; background:rgba(0,0,0,0.5); border:1px solid var(--border-glass); border-radius:6px; color:#fff; padding:8px 10px; font-size:12px; font-family:var(--font-mono); outline:none;">
-          <button class="btn-prism btn-primary-cyan" style="padding:8px 14px; font-size:12px;" onclick="saveGeminiKey()">
-            Guardar
-          </button>
-        </div>
-        <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
-          Tu clave se guarda únicamente en la memoria local de tu navegador. Si no tienes una a la mano, el motor heurístico local de PRISMA procesará tus pautas.
+        <div class="task-status" style="background: ${statusColors[task.estado] || '#64748b'}">
+          ${formatStatus(task.estado)}
         </div>
       </div>
-
-      <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:14px; line-height:1.5;">
-        Pega las pautas de cualquier tarea (viejas, nuevas o indicaciones de WhatsApp). PRISMA analizará el tema a fondo y construirá los archivos con portada UNICA, normas APA y formatos de diseño reales.
-      </p>
-
-      <!-- Selector de Tipo de Entregable -->
-      <div class="tabs-multimodal" id="studio-format-tabs">
-        <button class="tab-multimodal-btn active" data-type="auto" onclick="selectStudioTab(this, 'auto')">✨ Autodetectar Formatos</button>
-        <button class="tab-multimodal-btn" data-type="essay" onclick="selectStudioTab(this, 'essay')">📄 Ensayo / Memoria (PDF APA)</button>
-        <button class="tab-multimodal-btn" data-type="identity" onclick="selectStudioTab(this, 'identity')">📐 Identidad / Vectores (Illustrator)</button>
-        <button class="tab-multimodal-btn" data-type="mockup" onclick="selectStudioTab(this, 'mockup')">🖼️ Mockup & Pieza (Photoshop)</button>
-        <button class="tab-multimodal-btn" data-type="budget" onclick="selectStudioTab(this, 'budget')">📊 Presupuesto & Plan (Excel)</button>
-      </div>
-
-      <!-- Área de Entrada de Consignas -->
-      <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-sm); padding:16px; margin-bottom:16px;">
-        <label style="font-size:12.5px; font-weight:700; color:var(--cyan-neon); display:block; margin-bottom:6px;">
-          Pautas o Instrucciones de la Asignación:
-        </label>
-        <textarea id="studio-prompt-input" style="width:100%; height:130px; background:rgba(255,255,255,0.04); border:1px solid var(--border-glass); border-radius:6px; color:#fff; padding:12px; font-family:inherit; font-size:13px; outline:none; resize:vertical; line-height:1.5;" placeholder="Pega aquí las instrucciones completas del profesor (por ejemplo: 'Realizar un ensayo de 3 páginas sobre la Semiótica de Umberto Eco y su aplicación en la comunicación visual actual...')" autofocus></textarea>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
-          <span id="ai-status-indicator" style="font-size:11.5px; color:${hasKey ? 'var(--emerald-success)' : 'var(--amber-warning)'}; font-weight:600;">
-            ${hasKey ? '⚡ Motor: Google Gemini 2.5 Flash en vivo' : '⚡ Motor: Analizador Local Heurístico'}
+      
+      <div class="task-body">
+        <p class="task-description">${escapeHtml(task.descripcion || '').substring(0, 100)}...</p>
+        
+        <div class="task-meta">
+          ${daysUntilDue !== null ? `
+            <span class="meta-item ${urgencyClass}">
+              <i class="fas fa-clock"></i>
+              ${daysUntilDue < 0 ? 'Vencida' : daysUntilDue === 0 ? 'Hoy' : daysUntilDue + ' días'}
+            </span>
+          ` : ''}
+          
+          <span class="meta-item">
+            <i class="fas fa-file-alt"></i>
+            ${task.tipo || 'Proyecto'}
           </span>
-          <button class="btn-prism btn-primary-cyan" style="padding:10px 20px;" onclick="executeAIAnalysis()">
-            🚀 Analizar Pautas & Generar Entregables
-          </button>
+          
+          <span class="meta-item">
+            <i class="fas fa-percentage"></i>
+            ${task.porcentaje_nota || 0}%
+          </span>
         </div>
       </div>
-
-      <!-- Zona de Salida Dinámica -->
-      <div id="studio-output-area" style="display:none;"></div>
+      
+      <div class="task-footer">
+        <div class="task-formats">
+          ${(task.formatos_requeridos || 'PDF').split(',').map(fmt => 
+            `<span class="format-tag">${fmt.trim()}</span>`
+          ).join('')}
+        </div>
+        
+        <div class="task-actions">
+          ${task.estado === 'Pendiente' ? `
+            <button class="action-btn" onclick="event.stopPropagation(); updateTaskStatus('${task.id}', 'En_Proceso')">
+              <i class="fas fa-play"></i>
+            </button>
+          ` : ''}
+          
+          ${task.estado === 'En_Proceso' ? `
+            <button class="action-btn" onclick="event.stopPropagation(); generateForTask('${task.id}')">
+              <i class="fas fa-magic"></i>
+            </button>
+          ` : ''}
+        </div>
+      </div>
     </div>
   `;
 }
 
-window.toggleApiKeyInput = function() {
-  const box = document.getElementById('gemini-key-box');
-  if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
-};
+function formatStatus(status) {
+  const statusMap = {
+    'Pendiente': 'Pendiente',
+    'En_Proceso': 'En Proceso',
+    'Lista_Entregada': 'Lista',
+    'Entregada': 'Entregada',
+    'Calificada': 'Calificada'
+  };
+  return statusMap[status] || status;
+}
 
-window.saveGeminiKey = function() {
-  const val = document.getElementById('gemini-api-key-input')?.value.trim();
-  state.apiKey = val;
-  if (val) {
-    localStorage.setItem('prisma_gemini_key', val);
-    showToast('✓ Clave de Gemini guardada con éxito.');
+// ============================================================================
+// PANTALLA ESTUDIO (IA)
+// ============================================================================
+function renderStudioScreen(container) {
+  const hasKey = !!state.apiKey;
+  
+  container.innerHTML = `
+    <div class="screen-header">
+      <h2>🎨 Estudio Multimodal</h2>
+      <button class="secondary-button" onclick="toggleApiKeyInput()">
+        <i class="fas fa-key"></i> ${hasKey ? 'IA Conectada' : 'Conectar Gemini'}
+      </button>
+    </div>
+    
+    <!-- Configuración de API -->
+    <div id="gemini-config-box" style="display: ${hasKey ? 'none' : 'block'};" class="config-box">
+      <h3>⚡ Conectar Google Gemini</h3>
+      <p>Para generación avanzada de contenido académico, conecta tu clave de API de Google Gemini (gratis).</p>
+      
+      <div class="form-group">
+        <label>Clave de API (AIzaSy...)</label>
+        <input type="password" id="gemini-api-key" value="${state.apiKey}" placeholder="Pega tu clave de Google AI Studio">
+      </div>
+      
+      <div class="form-actions">
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" class="link-button">
+          Obtener clave gratis ↗
+        </a>
+        <button class="primary-button" onclick="saveGeminiKey()">Guardar Clave</button>
+      </div>
+      
+      <p class="note">Tu clave se guarda localmente en tu navegador. Si no tienes una, PRISMA usará su motor heurístico local.</p>
+    </div>
+    
+    <!-- Selector de tipo de entregable -->
+    <div class="format-selector">
+      <button class="format-btn active" data-type="auto" onclick="selectFormat(this, 'auto')">
+        <i class="fas fa-magic"></i> Autodetectar
+      </button>
+      <button class="format-btn" data-type="essay" onclick="selectFormat(this, 'essay')">
+        <i class="fas fa-file-alt"></i> Ensayo PDF
+      </button>
+      <button class="format-btn" data-type="design" onclick="selectFormat(this, 'design')">
+        <i class="fas fa-palette"></i> Diseño Vectorial
+      </button>
+      <button class="format-btn" data-type="presentation" onclick="selectFormat(this, 'presentation')">
+        <i class="fas fa-presentation"></i> Presentación
+      </button>
+    </div>
+    
+    <!-- Área de entrada de pautas -->
+    <div class="prompt-area">
+      <label>Pautas o Instrucciones de la Tarea:</label>
+      <textarea id="studio-prompt" rows="6" placeholder="Pega aquí las instrucciones completas del profesor (ej: 'Realizar un ensayo de 3 páginas sobre la Semiótica de Umberto Eco...')"></textarea>
+      
+      <div class="prompt-actions">
+        <span class="ai-status ${hasKey ? 'connected' : 'local'}">
+          ${hasKey ? '⚡ Motor: Google Gemini 2.5 Flash' : '⚡ Motor: Analizador Local Heurístico'}
+        </span>
+        <button class="primary-button" onclick="executeAIAnalysis()">
+          <i class="fas fa-rocket"></i> Analizar y Generar
+        </button>
+      </div>
+    </div>
+    
+    <!-- Área de resultados -->
+    <div id="studio-results" style="display: none;"></div>
+  `;
+}
+
+function toggleApiKeyInput() {
+  const box = document.getElementById('gemini-config-box');
+  if (box) {
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function saveGeminiKey() {
+  const key = document.getElementById('gemini-api-key').value.trim();
+  state.apiKey = key;
+  localStorage.setItem('prisma_gemini_key', key);
+  
+  if (key) {
+    showToast('✓ Clave de Gemini guardada');
   } else {
     localStorage.removeItem('prisma_gemini_key');
     showToast('Clave removida. Modo local activado.');
   }
-  renderStudioView(document.getElementById('view-container'));
-};
+  
+  renderStudioScreen(document.getElementById('screen'));
+}
 
-window.selectStudioTab = function(btn, type) {
-  document.querySelectorAll('#studio-format-tabs .tab-multimodal-btn').forEach(b => b.classList.remove('active'));
+function selectFormat(btn, type) {
+  document.querySelectorAll('.format-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   btn.setAttribute('data-selected-type', type);
-};
+}
 
-// ============================================================================
-// 3. MOTOR DE GENERACIÓN DINÁMICO (GEMINI API + PARSER HEURÍSTICO)
-// ============================================================================
-window.executeAIAnalysis = async function() {
-  const prompt = document.getElementById('studio-prompt-input')?.value.trim();
+async function executeAIAnalysis() {
+  const prompt = document.getElementById('studio-prompt').value.trim();
   if (!prompt) {
-    alert('Por favor pega o escribe las pautas de la tarea.');
+    Swal.fire('Error', 'Por favor ingresa las pautas de la tarea', 'error');
     return;
   }
-
-  const outputArea = document.getElementById('studio-output-area');
-  outputArea.style.display = 'block';
-  outputArea.innerHTML = `
-    <div style="text-align:center; padding:30px; background:rgba(0,0,0,0.4); border-radius:8px; border:1px solid rgba(0,240,255,0.2);">
-      <div style="font-size:24px; animation:spin 1s linear infinite; display:inline-block; margin-bottom:10px;">⚙️</div>
-      <div style="font-weight:700; color:var(--cyan-neon); font-size:14px; margin-bottom:4px;">
-        PRISMA está investigando y procesando las pautas...
-      </div>
-      <div style="font-size:12px; color:var(--text-muted);">
-        Estructurando memoria técnica institucional UNICA, retícula de diseño y archivos descargables.
-      </div>
+  
+  const resultsArea = document.getElementById('studio-results');
+  resultsArea.style.display = 'block';
+  resultsArea.innerHTML = `
+    <div class="loading-state">
+      <i class="fas fa-cog fa-spin"></i>
+      <p>PRISMA está analizando las pautas...</p>
+      <p class="sub-text">Estructurando contenido académico y generando entregables</p>
     </div>
   `;
-
+  
   try {
-    let resultData = null;
-
-    if (state.apiKey) {
-      // LLAMADA A LA API DE GEMINI 2.5 FLASH
-      showToast('⚡ Conectando con Google Gemini...');
-      resultData = await callGeminiAPI(prompt, state.apiKey);
+    let resultData;
+    
+    if (state.apiKey && PRISMA_CONFIG.API_URL) {
+      // Usar backend con Gemini
+      resultData = await callBackendForGeneration(prompt);
+    } else if (state.apiKey) {
+      // Llamada directa a Gemini (sin backend)
+      resultData = await callGeminiDirectly(prompt);
     } else {
-      // MOTOR LOCAL HEURÍSTICO AVANZADO
-      showToast('⚡ Procesando con motor heurístico local...');
-      await new Promise(r => setTimeout(r, 900));
+      // Motor heurístico local
+      await new Promise(r => setTimeout(r, 1000));
       resultData = analyzePromptLocally(prompt);
     }
-
+    
     state.activeGeneratedWork = resultData;
-    renderGeneratedResults(resultData, outputArea);
-    showToast('✓ ¡Asignación analizada y entregables listos!');
-
+    renderGeneratedResults(resultData, resultsArea);
+    showToast('✓ Análisis completado y entregables listos');
+    
   } catch (err) {
     console.error('Error en generación:', err);
-    // Fallback al motor local si la API falla (ej. clave inválida o cuota)
-    showToast('⚠️ No se pudo contactar Gemini. Usando motor local de respaldo...');
-    const localData = analyzePromptLocally(prompt);
-    state.activeGeneratedWork = localData;
-    renderGeneratedResults(localData, outputArea);
+    resultsArea.innerHTML = `
+      <div class="error-state">
+        <i class="fas fa-exclamation-triangle"></i>
+        <p>Error en la generación</p>
+        <p class="sub-text">${err.message}</p>
+        <button class="secondary-button" onclick="executeAIAnalysis()">Reintentar</button>
+      </div>
+    `;
   }
-};
+}
 
-// Llamada REST a Gemini 2.5 Flash
-async function callGeminiAPI(userPrompt, apiKey) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
-  const systemInstruction = `Eres PRISMA, asistente académico y de diseño gráfico de élite para Moisés González (C.I. V-31.171.020), estudiante de la Universidad Católica Cecilio Acosta (UNICA) en Maracaibo, Venezuela.
-Analiza las pautas de la tarea que te da el usuario y devuelve ÚNICAMENTE un objeto JSON válido con la siguiente estructura (sin markdown, sin comillas triples, sólo JSON crudo):
+async function callGeminiDirectly(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`;
+  
+  const systemInstruction = `Eres PRISMA, asistente académico de élite. Analiza las pautas y devuelve un JSON con esta estructura:
 {
-  "titulo": "Título formal académico y llamativo de la asignación",
-  "materia": "Nombre de la materia inferida o Taller de Imagen Corporativa",
-  "resumen_ejecutivo": "Resumen de 2 a 3 oraciones de lo desarrollado",
-  "marco_teorico": "Texto redactado formal y riguroso de introducción y marco conceptual (2 párrafos)",
+  "titulo": "Título académico",
+  "materia": "Nombre de materia",
+  "resumen_ejecutivo": "Resumen de 2-3 oraciones",
+  "marco_teorico": "Introducción y marco conceptual (2 párrafos)",
   "desarrollo_puntos": [
-    {"subtitulo": "Nombre del punto", "contenido": "Explicación detallada y fundamentada"}
+    {"subtitulo": "Nombre del punto", "contenido": "Explicación detallada"}
   ],
-  "conclusiones": "Conclusiones analíticas del trabajo",
-  "referencias_apa": [
-    "Apellido, A. (Año). Título del libro o fuente. Editorial."
-  ],
-  "paleta_sugerida": [
-    {"nombre": "Color Principal", "pantone": "Pantone XXX", "cmyk": "C:X M:X Y:X K:X", "hex": "#HEX"}
-  ],
-  "presupuesto_items": [
-    {"fase": "Fase 1", "descripcion": "Detalle", "horas": 10, "costo": 150}
-  ],
-  "formato_photoshop": {
-    "ancho_cm": 9.6,
-    "alto_cm": 5.6,
-    "descripcion": "Tarjeta / Afiche / Portada"
-  }
+  "conclusiones": "Conclusiones analíticas",
+  "referencias_apa": ["Apellido, A. (Año). Título. Editorial."],
+  "paleta_sugerida": [{"nombre": "Color", "hex": "#HEX"}]
 }`;
-
+  
   const body = {
-    contents: [
-      {
-        parts: [
-          { text: systemInstruction + "
-
-PAUTAS DEL PROFESOR:
-" + userPrompt }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.4,
-      responseMimeType: "application/json"
-    }
+    contents: [{ parts: [{ text: systemInstruction + "\n\nPAUTAS:\n" + prompt }] }],
+    generationConfig: { temperature: 0.4, responseMimeType: "application/json" }
   };
-
-  const resp = await fetch(url, {
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
-
-  if (!resp.ok) {
-    const errorText = await resp.text();
-    throw new Error(`Gemini API error: ${resp.status} - ${errorText}`);
-  }
-
-  const json = await resp.json();
+  
+  if (!response.ok) throw new Error('Error en API Gemini');
+  
+  const json = await response.json();
   const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
   return JSON.parse(rawText);
 }
 
-// Analizador Heurístico Local (Sin requerir API)
+async function callBackendForGeneration(prompt) {
+  const response = await fetch(PRISMA_CONFIG.API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'prisma_generate_content',
+      prompt: prompt,
+      tipo: 'auto'
+    })
+  });
+  
+  const data = await response.json();
+  if (!data.ok) throw new Error(data.mensaje || 'Error en backend');
+  
+  return JSON.parse(data.contenido);
+}
+
 function analyzePromptLocally(prompt) {
+  // Motor heurístico local simplificado
   const p = prompt.toLowerCase();
   
-  // Detección de tema
-  let topic = "Análisis y Desarrollo de Comunicación Visual";
-  let subject = "Cátedra Universitaria (UNICA)";
-  let isEditorial = p.includes("manual") || p.includes("editorial") || p.includes("revista") || p.includes("indesign");
-  let isBranding = p.includes("marca") || p.includes("isotipo") || p.includes("logotipo") || p.includes("corporativ");
-  let isEssay = p.includes("ensayo") || p.includes("informe") || p.includes("investig") || p.includes("semiotica") || p.includes("teoria");
-  let isPhoto = p.includes("foto") || p.includes("imagen") || p.includes("afiche") || p.includes("cartel");
-
-  if (isBranding) {
-    topic = "Identidad Visual y Construcción Sígnica Corporativa";
+  let topic = "Análisis Académico General";
+  let subject = "Cátedra Universitaria";
+  
+  if (p.includes("marca") || p.includes("isotipo") || p.includes("logotipo")) {
+    topic = "Identidad Visual Corporativa";
     subject = "Taller de Imagen Corporativa";
-  } else if (isEssay) {
-    topic = "Fundamentación Teórica y Análisis Semiótico de la Comunicación";
-    subject = "Teoría y Práctica de la Comunicación";
-  } else if (isEditorial) {
-    topic = "Maquetación Editorial y Sistemas de Retícula";
-    subject = "Diseño Editorial y Diagramación";
-  } else if (isPhoto) {
-    topic = "Composición Fotográfica y Producción Publicitaria";
-    subject = "Fotografía y Comunicación Visual";
+  } else if (p.includes("ensayo") || p.includes("informe") || p.includes("investig")) {
+    topic = "Fundamentación Teórica Académica";
+    subject = "Teoría de la Comunicación";
+  } else if (p.includes("editorial") || p.includes("revista") || p.includes("diagram")) {
+    topic = "Diseño Editorial y Diagramación";
+    subject = "Diseño Editorial";
   }
-
-  // Extraer primeras palabras significativas como título
-  const words = prompt.split(/\s+/).filter(w => w.length > 3).slice(0, 7).join(" ");
-  const customTitle = words.length > 10 ? words.charAt(0).toUpperCase() + words.slice(1) : topic;
-
+  
   return {
-    titulo: customTitle,
+    titulo: topic + " - Análisis Académico",
     materia: subject,
-    resumen_ejecutivo: `Proyecto formulado para dar cumplimiento estricto a las pautas de evaluación: "${prompt.substring(0, 110)}...". Estructurado bajo criterios de excelencia académica UNICA y normas APA 7ma.`,
-    marco_teorico: `El estudio de este proyecto se fundamenta en la articulación teórico-práctica demandada por el programa académico de la Universidad Católica Cecilio Acosta. A partir de las directrices señaladas ("${prompt.substring(0, 90)}"), se establece una metodología orientada al análisis crítico y la resolución proyectual.`,
+    resumen_ejecutivo: `Proyecto académico basado en las pautas: "${prompt.substring(0, 80)}...". Estructurado bajo normas académicas institucionales.`,
+    marco_teorico: `El presente trabajo se fundamenta en los principios teóricos de la cátedra, abordando la temática desde una perspectiva analítica y propositiva según las directrices establecidas.`,
     desarrollo_puntos: [
       {
-        subtitulo: "1. Diagnóstico Conceptual y Requerimientos",
-        contenido: "Se identificaron los requerimientos esenciales formulados en la consigna académica, organizando los objetivos en fases secuenciales de investigación, conceptualización y materialización técnica."
+        subtitulo: "1. Contexto y Diagnóstico",
+        contenido: "Se identifican los elementos clave de la problemática planteada, estableciendo el marco de referencia para el análisis."
       },
       {
-        subtitulo: "2. Metodología y Criterios de Ejecución",
-        contenido: "Se adoptó una estructura sistemática basada en normas internacionales de diseño y redacción académica, asegurando legibilidad, congruencia visual y rigor analítico."
+        subtitulo: "2. Desarrollo y Análisis",
+        contenido: "Se profundiza en los aspectos conceptuales y prácticos de la temática, aplicando los fundamentos teóricos de la cátedra."
       },
       {
-        subtitulo: "3. Síntesis y Resultados Obtenidos",
-        contenido: "La propuesta final responde con fidelidad a las especificaciones solicitadas, optimizando tanto los recursos técnicos como el discurso conceptual."
+        subtitulo: "3. Conclusiones y Propuestas",
+        contenido: "Se sintetizan los hallazgos principales y se presentan conclusiones fundamentadas."
       }
     ],
-    conclusiones: "El desarrollo presentado demuestra dominio conceptual y competencia en la resolución de problemas de comunicación, alineado a las exigencias evaluativas de la facultad.",
+    conclusiones: "El análisis realizado demuestra comprensión de los conceptos fundamentales y capacidad de aplicación práctica de los conocimientos académicos.",
     referencias_apa: [
       "Frascara, J. (2004). Diseño de comunicación. Ediciones Infinito.",
       "Eco, U. (1994). Signo. Editorial Labor.",
-      "Costa, J. (2012). La imagen de marca: Un fenómeno social. Paidós."
+      "Costa, J. (2012). La imagen de marca. Paidós."
     ],
     paleta_sugerida: [
-      { nombre: "Tono Primario", pantone: "Pantone 286 C", cmyk: "C:100 M:75 Y:0 K:0", hex: "#0033A0" },
-      { nombre: "Acento Neón", pantone: "Pantone Cyan", cmyk: "C:100 M:0 Y:0 K:0", hex: "#00F0FF" },
-      { nombre: "Base Abisal", pantone: "Pantone 2965 C", cmyk: "C:90 M:80 Y:45 K:65", hex: "#0E1424" }
-    ],
-    presupuesto_items: [
-      { fase: "Investigación & Brief", descripcion: "Revisión bibliográfica y levantamiento de requisitos", horas: 12, costo: 180 },
-      { fase: "Conceptualización", descripcion: "Bocetería preliminar y formulación discursiva", horas: 16, costo: 240 },
-      { fase: "Producción Técnica", descripcion: "Diagramación vectorial y redacción formal", horas: 20, costo: 350 },
-      { fase: "Revisión Final", descripcion: "Control de calidad editorial y despacho al campus", horas: 6, costo: 90 }
-    ],
-    formato_photoshop: {
-      ancho_cm: 21.59,
-      alto_cm: 27.94,
-      descripcion: "Lienzo Tamaño Carta a 300 DPI"
-    }
+      { nombre: "Principal", hex: "#0033A0" },
+      { nombre: "Acento", hex: "#00F0FF" },
+      { nombre: "Base", hex: "#0E1424" }
+    ]
   };
 }
 
-// Renderizado de Resultados en la interfaz
 function renderGeneratedResults(data, container) {
   container.innerHTML = `
-    <div style="background:rgba(147,51,234,0.12); border:1px solid rgba(147,51,234,0.35); border-radius:10px; padding:18px; margin-top:10px;">
-      
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+    <div class="results-container">
+      <div class="results-header">
         <div>
-          <span style="font-size:11px; text-transform:uppercase; color:var(--emerald-success); font-weight:700; letter-spacing:0.5px;">
-            ✓ Análisis de Pautas Completado por PRISMA
-          </span>
-          <h3 style="font-size:17px; font-weight:800; color:#fff; margin-top:3px;">
-            ${escapeHtml(data.titulo)}
-          </h3>
-          <div style="font-size:12px; color:var(--cyan-neon);">
-            Materia: ${escapeHtml(data.materia)} · UNICA 2026
-          </div>
+          <span class="success-badge">✓ Análisis Completado</span>
+          <h3>${escapeHtml(data.titulo)}</h3>
+          <p class="results-subtitle">${escapeHtml(data.materia)} · UNICA</p>
         </div>
-        <button class="btn-prism btn-ghost" style="font-size:11px; padding:4px 10px;" onclick="addActiveWorkToRadar()">
-          + Enviar al Radar
+        <button class="secondary-button" onclick="addWorkToRadar()">
+          <i class="fas fa-plus"></i> Enviar al Radar
         </button>
       </div>
-
-      <div style="background:rgba(0,0,0,0.3); border-radius:8px; padding:12px; margin-bottom:14px; border:1px solid rgba(255,255,255,0.06);">
-        <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">RESUMEN EJECUTIVO:</div>
-        <p style="font-size:12.5px; color:#e2e8f0; line-height:1.5;">
-          ${escapeHtml(data.resumen_ejecutivo)}
-        </p>
+      
+      <div class="results-summary">
+        <h4>Resumen Ejecutivo</h4>
+        <p>${escapeHtml(data.resumen_ejecutivo)}</p>
       </div>
-
-      <!-- Descargas de Archivos Adaptadas al Contenido Específico -->
-      <div style="font-size:12.5px; font-weight:700; color:#fff; margin-bottom:8px;">
-        📦 Archivos Generados Basados en TUS Pautas:
-      </div>
-
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-bottom:14px;">
-        
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:12px;">
-          <div style="font-size:12.5px; font-weight:700; color:#fca5a5; margin-bottom:4px;">📄 Memoria PDF</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Formato formal UNICA con normas APA 7ma</div>
-          <button class="btn-prism btn-ghost" style="width:100%; font-size:11.5px; padding:6px;" onclick="downloadDynamicFile('pdf')">
-            Descargar / Imprimir PDF
-          </button>
+      
+      <div class="generated-files">
+        <h4>📦 Archivos Generados</h4>
+        <div class="files-grid">
+          <div class="file-card">
+            <i class="fas fa-file-pdf" style="color: #ef4444;"></i>
+            <span>Memoria PDF</span>
+            <button class="download-btn" onclick="downloadFile('pdf')">Descargar</button>
+          </div>
+          
+          <div class="file-card">
+            <i class="fas fa-file-word" style="color: #3b82f6;"></i>
+            <span>Documento Word</span>
+            <button class="download-btn" onclick="downloadFile('word')">Descargar</button>
+          </div>
+          
+          <div class="file-card">
+            <i class="fas fa-vector-square" style="color: #f59e0b;"></i>
+            <span>Vector SVG</span>
+            <button class="download-btn" onclick="downloadFile('svg')">Descargar</button>
+          </div>
+          
+          <div class="file-card">
+            <i class="fas fa-images" style="color: #10b981;"></i>
+            <span>Script Photoshop</span>
+            <button class="download-btn" onclick="downloadFile('jsx')">Descargar</button>
+          </div>
         </div>
-
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(59,130,246,0.3); border-radius:8px; padding:12px;">
-          <div style="font-size:12.5px; font-weight:700; color:#93c5fd; margin-bottom:4px;">📝 Documento Word</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Editable con portada, marco y citas</div>
-          <button class="btn-prism btn-ghost" style="width:100%; font-size:11.5px; padding:6px;" onclick="downloadDynamicFile('word')">
-            Descargar Word (.doc)
-          </button>
-        </div>
-
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,154,0,0.3); border-radius:8px; padding:12px;">
-          <div style="font-size:12.5px; font-weight:700; color:#fdba74; margin-bottom:4px;">📐 Illustrator Vectorial</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Gráficos SVG con retícula adaptada</div>
-          <button class="btn-prism btn-ghost" style="width:100%; font-size:11.5px; padding:6px;" onclick="downloadDynamicFile('illustrator')">
-            Descargar SVG/AI
-          </button>
-        </div>
-
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(49,168,255,0.3); border-radius:8px; padding:12px;">
-          <div style="font-size:12.5px; font-weight:700; color:#7dd3fc; margin-bottom:4px;">🖼️ Script Photoshop</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Lienzo a 300 DPI con carpetas de capas</div>
-          <button class="btn-prism btn-ghost" style="width:100%; font-size:11.5px; padding:6px;" onclick="downloadDynamicFile('photoshop')">
-            Descargar Script JSX
-          </button>
-        </div>
-
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:12px;">
-          <div style="font-size:12.5px; font-weight:700; color:#6ee7b7; margin-bottom:4px;">📊 Presupuesto Excel</div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Costos, horas y cronograma del tema</div>
-          <button class="btn-prism btn-ghost" style="width:100%; font-size:11.5px; padding:6px;" onclick="downloadDynamicFile('excel')">
-            Descargar Excel (.csv)
-          </button>
-        </div>
-
       </div>
     </div>
   `;
 }
 
-window.addActiveWorkToRadar = function() {
+function addWorkToRadar() {
   if (!state.activeGeneratedWork) return;
+  
   const d = state.activeGeneratedWork;
-  const newAssignment = {
-    id: 'ASN-' + Date.now().toString().slice(-4),
-    courseId: 14739,
-    title: d.titulo,
-    description: d.resumen_ejecutivo,
-    deadline: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    status: 'ready_review',
-    formats: ['PDF', 'Word', 'Illustrator', 'Photoshop'],
-    generatedDeliverables: {
-      pdfTitle: `${d.titulo.replace(/\s+/g, '_')}_UNICA.pdf`,
-      wordTitle: `${d.titulo.replace(/\s+/g, '_')}.doc`,
-      aiTitle: `Vectores_${d.titulo.replace(/\s+/g, '_')}.svg`,
-      psdTitle: `Lienzo_${d.titulo.replace(/\s+/g, '_')}.jsx`,
-      previewSummary: d.resumen_ejecutivo
-    },
-    workData: d
+  const newTask = {
+    id: 'TAR-' + Date.now().toString().slice(-6),
+    materia_id: '',
+    materia_nombre: d.materia,
+    titulo: d.titulo,
+    descripcion: d.resumen_ejecutivo,
+    tipo: 'Proyecto',
+    fecha_entrega: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+    prioridad: 'Media',
+    estado: 'Pendiente',
+    formatos_requeridos: 'PDF,Word,SVG',
+    fuente: 'PRISMA IA',
+    fecha_creacion: new Date().toISOString()
   };
+  
+  state.tareas.unshift(newTask);
+  localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+  
+  showToast('✓ Tarea agregada al Radar Académico');
+  navigate('radar');
+}
 
-  state.assignments.unshift(newAssignment);
-  localStorage.setItem('prisma_assignments', JSON.stringify(state.assignments));
-  showToast('✓ Tarea agregada con éxito al Radar Académico.');
-  switchTab('radar');
-};
-
-// ============================================================================
-// 4. DESCARGAS DINÁMICAS BASADAS EN EL CONTENIDO REAL DE LA TAREA
-// ============================================================================
-window.downloadDynamicFile = function(type) {
-  const d = state.activeGeneratedWork;
-  if (!d) {
-    alert('Primero genera una asignación en el Estudio.');
+function downloadFile(type) {
+  if (!state.activeGeneratedWork) {
+    Swal.fire('Error', 'Primero genera un contenido en el Estudio', 'error');
     return;
   }
-
-  const cleanTitle = (d.titulo || 'Entregable_UNICA').replace(/[^a-zA-Z0-9_-]/g, '_');
-
+  
+  const d = state.activeGeneratedWork;
+  const cleanTitle = (d.titulo || 'Entregable').replace(/[^a-zA-Z0-9_-]/g, '_');
+  
   switch (type) {
-    case 'pdf': {
-      const pdfWindow = window.open('', '_blank');
-      const puntosHtml = (d.desarrollo_puntos || []).map(p => `
-        <h2 style="font-size:13pt; font-weight:bold; margin-top:24px; color:#0e1424;">${escapeHtml(p.subtitulo)}</h2>
-        <p style="text-align:justify; text-indent:1.27cm; margin:0 0 12px 0;">${escapeHtml(p.contenido)}</p>
-      `).join('');
-
-      const referenciasHtml = (d.referencias_apa || []).map(r => `
-        <p style="padding-left:1.27cm; text-indent:-1.27cm; margin-bottom:8px; font-size:11pt;">${escapeHtml(r)}</p>
-      `).join('');
-
-      pdfWindow.document.write(`
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-          <meta charset="UTF-8">
-          <title>${escapeHtml(d.titulo)} — UNICA</title>
-          <style>
-            @page { size: letter; margin: 2.54cm; }
-            body { font-family: 'Times New Roman', serif; line-height: 2; color: #111; max-width: 800px; margin: 0 auto; padding: 40px; }
-            .header-unica { text-align: center; font-weight: bold; line-height: 1.3; margin-bottom: 50px; font-size: 13pt; }
-            .title-section { text-align: center; margin: 70px 0; }
-            .title-doc { font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
-            .meta-section { margin-top: 80px; font-size: 12pt; line-height: 1.6; }
-            .page-break { page-break-before: always; }
-            h2 { font-size: 13pt; margin-top: 24px; font-weight: bold; }
-            p { text-align: justify; text-indent: 1.27cm; margin: 0 0 10px 0; }
-            @media print { .no-print { display: none; } }
-          </style>
-        </head>
-        <body>
-          <div class="no-print" style="background:#f0fdf4; border:1px solid #86efac; padding:12px; margin-bottom:20px; text-align:center; font-family:sans-serif;">
-            <button onclick="window.print()" style="background:#10b981; color:#fff; border:none; padding:8px 18px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">
-              🖨️ Imprimir / Guardar como PDF
-            </button>
-            <span style="font-size:12px; color:#15803d; margin-left:12px;">Memoria Académica UNICA bajo Normas APA 7ma</span>
-          </div>
-
-          <div class="header-unica">
-            REPÚBLICA BOLIVARIANA DE VENEZUELA<br>
-            UNIVERSIDAD CATÓLICA CECILIO ACOSTA<br>
-            FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN<br>
-            CÁTEDRA: ${escapeHtml(d.materia || 'COMUNICACIÓN Y DISEÑO')}
-          </div>
-
-          <div class="title-section">
-            <div class="title-doc">${escapeHtml(d.titulo)}</div>
-            <div style="font-size: 12pt; font-style: italic;">Memoria Descriptiva y Fundamentación de Asignación</div>
-          </div>
-
-          <div class="meta-section">
-            <strong>Autor:</strong> Moisés González<br>
-            <strong>C.I.:</strong> V-31.171.020<br>
-            <strong>Institución:</strong> Universidad Católica Cecilio Acosta (UNICA)<br>
-            <strong>Fecha:</strong> Maracaibo, ${new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
-          </div>
-
-          <div class="page-break"></div>
-
-          <h2>1. Introducción y Resumen Ejecutivo</h2>
-          <p>${escapeHtml(d.resumen_ejecutivo)}</p>
-
-          <h2>2. Marco Teórico y Justificación</h2>
-          <p>${escapeHtml(d.marco_teorico)}</p>
-
-          ${puntosHtml}
-
-          <h2>Conclusiones</h2>
-          <p>${escapeHtml(d.conclusiones)}</p>
-
-          <div class="page-break"></div>
-          <h2>Referencias Bibliográficas (Normas APA 7ma)</h2>
-          ${referenciasHtml}
-        </body>
-        </html>
-      `);
-      pdfWindow.document.close();
-      showToast('📄 Vista previa de PDF generada.');
+    case 'pdf':
+      generateAndDownloadPDF(d, cleanTitle);
       break;
-    }
-
-    case 'word': {
-      const puntosWord = (d.desarrollo_puntos || []).map(p => `
-        <h2 style="color:#0033A0; border-bottom:1px solid #ddd; padding-bottom:4px;">${escapeHtml(p.subtitulo)}</h2>
-        <p>${escapeHtml(p.contenido)}</p>
-      `).join('');
-
-      const wordDoc = `
-        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-        <head><meta charset='utf-8'><title>${escapeHtml(d.titulo)}</title>
-        <style>
-          body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; margin: 35px; }
-          .inst-header { text-align: center; font-weight: bold; font-size: 12pt; margin-bottom: 30px; }
-          h1 { color: #0033A0; text-align: center; font-size: 16pt; margin: 30px 0; }
-          h2 { color: #0E1424; font-size: 13pt; margin-top: 20px; }
-          p { text-align: justify; margin-bottom: 12px; }
-        </style>
-        </head>
-        <body>
-          <div class="inst-header">
-            UNIVERSIDAD CATÓLICA CECILIO ACOSTA<br>
-            FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN<br>
-            CÁTEDRA: ${escapeHtml(d.materia)}
-          </div>
-          <h1>${escapeHtml(d.titulo)}</h1>
-          <p><strong>Estudiante:</strong> Moisés González (C.I. V-31.171.020)<br>
-          <strong>Institución:</strong> UNICA - Maracaibo, Venezuela</p>
-          <hr>
-          <h2>1. Introducción</h2>
-          <p>${escapeHtml(d.marco_teorico)}</p>
-          ${puntosWord}
-          <h2>Conclusiones</h2>
-          <p>${escapeHtml(d.conclusiones)}</p>
-        </body></html>
-      `;
-      triggerBlobDownload(wordDoc, `${cleanTitle}.doc`, 'application/msword');
+    case 'word':
+      generateAndDownloadWord(d, cleanTitle);
       break;
-    }
+    case 'svg':
+      generateAndDownloadSVG(d, cleanTitle);
+      break;
+    case 'jsx':
+      generateAndDownloadJSX(d, cleanTitle);
+      break;
+  }
+}
 
-    case 'illustrator': {
-      const svg = `<?xml version="1.0" encoding="utf-8"?>
+function generateAndDownloadPDF(data, filename) {
+  const pdfWindow = window.open('', '_blank');
+  const puntosHtml = (data.desarrollo_puntos || []).map(p => `
+    <h2 style="font-size:13pt; font-weight:bold; margin-top:24px;">${escapeHtml(p.subtitulo)}</h2>
+    <p style="text-align:justify; text-indent:1.27cm; margin:0 0 12px 0;">${escapeHtml(p.contenido)}</p>
+  `).join('');
+  
+  const referenciasHtml = (data.referencias_apa || []).map(r => `
+    <p style="padding-left:1.27cm; text-indent:-1.27cm; margin-bottom:8px; font-size:11pt;">${escapeHtml(r)}</p>
+  `).join('');
+  
+  pdfWindow.document.write(`
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <title>${escapeHtml(data.titulo)} — UNICA</title>
+      <style>
+        @page { size: letter; margin: 2.54cm; }
+        body { font-family: 'Times New Roman', serif; line-height: 2; color: #111; max-width: 800px; margin: 0 auto; padding: 40px; }
+        .header-unica { text-align: center; font-weight: bold; line-height: 1.3; margin-bottom: 50px; font-size: 13pt; }
+        .title-section { text-align: center; margin: 70px 0; }
+        .title-doc { font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
+        .meta-section { margin-top: 80px; font-size: 12pt; line-height: 1.6; }
+        .page-break { page-break-before: always; }
+        h2 { font-size: 13pt; margin-top: 24px; font-weight: bold; }
+        p { text-align: justify; text-indent: 1.27cm; margin: 0 0 10px 0; }
+        @media print { .no-print { display: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="no-print" style="background:#f0fdf4; border:1px solid #86efac; padding:12px; margin-bottom:20px; text-align:center; font-family:sans-serif;">
+        <button onclick="window.print()" style="background:#10b981; color:#fff; border:none; padding:8px 18px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">
+          🖨️ Imprimir / Guardar como PDF
+        </button>
+      </div>
+
+      <div class="header-unica">
+        UNIVERSIDAD CATÓLICA CECILIO ACOSTA<br>
+        FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN<br>
+        CÁTEDRA: ${escapeHtml(data.materia)}
+      </div>
+
+      <div class="title-section">
+        <div class="title-doc">${escapeHtml(data.titulo)}</div>
+        <div style="font-size: 12pt; font-style: italic;">Memoria Descriptiva Académica</div>
+      </div>
+
+      <div class="meta-section">
+        <strong>Autor:</strong> ${PRISMA_CONFIG.STUDENT_INFO.name}<br>
+        <strong>C.I.:</strong> ${PRISMA_CONFIG.STUDENT_INFO.cedula}<br>
+        <strong>Institución:</strong> ${PRISMA_CONFIG.STUDENT_INFO.university}<br>
+        <strong>Fecha:</strong> ${new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+      </div>
+
+      <div class="page-break"></div>
+
+      <h2>1. Resumen Ejecutivo</h2>
+      <p>${escapeHtml(data.resumen_ejecutivo)}</p>
+
+      <h2>2. Marco Teórico</h2>
+      <p>${escapeHtml(data.marco_teorico)}</p>
+
+      ${puntosHtml}
+
+      <h2>Conclusiones</h2>
+      <p>${escapeHtml(data.conclusiones)}</p>
+
+      <div class="page-break"></div>
+      <h2>Referencias Bibliográficas (Normas APA 7ma)</h2>
+      ${referenciasHtml}
+    </body>
+    </html>
+  `);
+  pdfWindow.document.close();
+}
+
+function generateAndDownloadWord(data, filename) {
+  const puntosWord = (data.desarrollo_puntos || []).map(p => `
+    <h2 style="color:#0033A0; border-bottom:1px solid #ddd; padding-bottom:4px;">${escapeHtml(p.subtitulo)}</h2>
+    <p>${escapeHtml(p.contenido)}</p>
+  `).join('');
+  
+  const wordDoc = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><meta charset='utf-8'><title>${escapeHtml(data.titulo)}</title>
+    <style>
+      body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; margin: 35px; }
+      .inst-header { text-align: center; font-weight: bold; font-size: 12pt; margin-bottom: 30px; }
+      h1 { color: #0033A0; text-align: center; font-size: 16pt; margin: 30px 0; }
+      h2 { color: #0E1424; font-size: 13pt; margin-top: 20px; }
+      p { text-align: justify; margin-bottom: 12px; }
+    </style>
+    </head>
+    <body>
+      <div class="inst-header">
+        UNIVERSIDAD CATÓLICA CECILIO ACOSTA<br>
+        FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN<br>
+        CÁTEDRA: ${escapeHtml(data.materia)}
+      </div>
+      <h1>${escapeHtml(data.titulo)}</h1>
+      <p><strong>Estudiante:</strong> ${PRISMA_CONFIG.STUDENT_INFO.name} (C.I. ${PRISMA_CONFIG.STUDENT_INFO.cedula})<br>
+      <strong>Institución:</strong> ${PRISMA_CONFIG.STUDENT_INFO.university}</p>
+      <hr>
+      <h2>1. Introducción</h2>
+      <p>${escapeHtml(data.marco_teorico)}</p>
+      ${puntosWord}
+      <h2>Conclusiones</h2>
+      <p>${escapeHtml(data.conclusiones)}</p>
+    </body></html>
+  `;
+  
+  triggerBlobDownload(wordDoc, `${filename}.doc`, 'application/msword');
+}
+
+function generateAndDownloadSVG(data, filename) {
+  const svg = `<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
   <defs>
     <style>
       .bg { fill: #070a12; }
-      .grid { stroke: rgba(0, 240, 255, 0.2); stroke-width: 1; stroke-dasharray: 4,4; }
-      .circle { fill: none; stroke: rgba(244, 63, 94, 0.4); stroke-width: 1.5; }
       .txt-title { font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; fill: #ffffff; }
       .txt-sub { font-family: Arial, sans-serif; font-size: 12px; fill: #94a3b8; }
     </style>
   </defs>
   <rect width="800" height="600" class="bg" />
-  <text x="40" y="50" class="txt-title">UNICA — ${escapeHtml(d.titulo).toUpperCase()}</text>
-  <text x="40" y="72" class="txt-sub">Moisés González (C.I. 31.171.020) · ${escapeHtml(d.materia)}</text>
-  
-  <line x1="100" y1="300" x2="700" y2="300" class="grid" />
-  <line x1="400" y1="100" x2="400" y2="500" class="grid" />
-  <circle cx="400" cy="300" r="140" class="circle" />
-  <circle cx="400" cy="300" r="86" class="circle" />
-
-  <polygon points="400,200 480,350 320,350" fill="#00f0ff" opacity="0.8" />
-  <circle cx="400" cy="300" r="24" fill="#9333ea" />
-  
-  <rect x="100" y="530" width="30" height="20" fill="#0033A0" rx="3" />
-  <text x="140" y="545" class="txt-sub">Pantone 286 C</text>
-  <rect x="350" y="530" width="30" height="20" fill="#00f0ff" rx="3" />
-  <text x="390" y="545" class="txt-sub">Cyan Neón #00F0FF</text>
+  <text x="40" y="50" class="txt-title">UNICA — ${escapeHtml(data.titulo).toUpperCase()}</text>
+  <text x="40" y="72" class="txt-sub">${PRISMA_CONFIG.STUDENT_INFO.name} · ${escapeHtml(data.materia)}</text>
 </svg>`;
-      triggerBlobDownload(svg, `${cleanTitle}.svg`, 'image/svg+xml');
-      break;
-    }
+  
+  triggerBlobDownload(svg, `${filename}.svg`, 'image/svg+xml');
+}
 
-    case 'photoshop': {
-      const psdSpec = d.formato_photoshop || { ancho_cm: 21.59, alto_cm: 27.94 };
-      const widthPx = Math.round((psdSpec.ancho_cm / 2.54) * 300);
-      const heightPx = Math.round((psdSpec.alto_cm / 2.54) * 300);
-
-      const jsx = `/**
+function generateAndDownloadJSX(data, filename) {
+  const jsx = `/**
  * Script Automático de Photoshop generado por PRISMA
- * Tarea: ${d.titulo}
- * Estudiante: Moisés González (C.I. 31.171.020)
+ * Tarea: ${data.titulo}
+ * Estudiante: ${PRISMA_CONFIG.STUDENT_INFO.name}
  * UNICA
  */
 #target photoshop
 app.bringToFront();
 
-var doc = app.documents.add(${widthPx}, ${heightPx}, 300, "${cleanTitle}", NewDocumentMode.RGB, DocumentFill.WHITE);
+var doc = app.documents.add(2480, 3508, 300, "${filename}", NewDocumentMode.RGB, DocumentFill.WHITE);
 
 var gGuias = doc.layerSets.add();
-gGuias.name = "[GUIAS Y COTAS]";
+gGuias.name = "[GUIAS]";
 
 var gArte = doc.layerSets.add();
-gArte.name = "[ARTE Y COMPOSICIÓN]";
+gArte.name = "[ARTE]";
 
 var gTextos = doc.layerSets.add();
-gTextos.name = "[TIPOGRAFÍA Y CONTENIDO]";
+gTextos.name = "[TEXTO]";
 
-var gFondo = doc.layerSets.add();
-gFondo.name = "[FONDO]";
-
-doc.guides.add(Direction.HORIZONTAL, 35);
-doc.guides.add(Direction.HORIZONTAL, ${heightPx - 35});
-doc.guides.add(Direction.VERTICAL, 35);
-doc.guides.add(Direction.VERTICAL, ${widthPx - 35});
-
-alert("¡Lienzo de Photoshop generado por PRISMA para UNICA!\n\n• Tarea: ${cleanTitle}\n• Resolución: 300 DPI\n• Capas organizadas\n\nEstudiante: Moisés González");
+alert("¡Lienzo de Photoshop generado por PRISMA!\\n\\n• Tarea: ${data.titulo}\\n• Resolución: 300 DPI\\n• Estudiante: ${PRISMA_CONFIG.STUDENT_INFO.name}");
 `;
-      triggerBlobDownload(jsx, `${cleanTitle}.jsx`, 'text/plain');
-      break;
-    }
-
-    case 'excel': {
-      let csv = '\uFEFF' + 'Ítem,Fase de Proyecto,Descripción Específica,Horas Estimadas,Costo ($),Subtotal ($)\n';
-      let total = 0;
-      (d.presupuesto_items || []).forEach((item, idx) => {
-        const sub = item.costo || 100;
-        total += sub;
-        csv += `${idx + 1},"${item.fase}","${item.descripcion}",${item.horas || 10},${sub}.00,$${sub}.00\n`;
-      });
-      csv += `,,,TOTAL PROYECTO,,$${total}.00\n`;
-      triggerBlobDownload(csv, `${cleanTitle}.csv`, 'text/csv;charset=utf-8;');
-      break;
-    }
-  }
-};
+  
+  triggerBlobDownload(jsx, `${filename}.jsx`, 'text/plain');
+}
 
 function triggerBlobDownload(content, filename, mimeType) {
   const blob = new Blob([content], { type: mimeType });
@@ -855,274 +1070,996 @@ function triggerBlobDownload(content, filename, mimeType) {
 }
 
 // ============================================================================
-// 5. MODAL PARA TAREA MANUAL
+// PANTALLA CALENDARIO
 // ============================================================================
-window.openManualTaskModal = function() {
-  const modal = document.getElementById('modal-review');
-  const body = document.getElementById('modal-review-body');
-  if (!modal || !body) return;
-
-  body.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-      <h2 style="font-size:17px; font-weight:800; color:#fff;">+ Nueva Tarea Manual en Radar</h2>
-      <button class="btn-prism btn-ghost" style="padding:4px 8px;" onclick="closeModal()">✕</button>
+function renderCalendarScreen(container) {
+  const today = new Date();
+  const currentMonth = today.getMonth();
+  const currentYear = today.getFullYear();
+  
+  container.innerHTML = `
+    <div class="screen-header">
+      <h2>📅 Calendario Académico</h2>
+      <button class="secondary-button" onclick="openNewEventModal()">
+        <i class="fas fa-plus"></i> Nuevo Evento
+      </button>
     </div>
-    <div style="margin-bottom:12px;">
-      <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:4px;">Título de la Tarea:</label>
-      <input type="text" id="manual-title" placeholder="Ej: Ensayo sobre Historia del Diseño" style="width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--border-glass); border-radius:6px; color:#fff; padding:8px 10px; font-size:13px; outline:none;">
+    
+    <div class="calendar-container">
+      <div class="calendar-header">
+        <button class="nav-btn" onclick="changeMonth(-1)"><i class="fas fa-chevron-left"></i></button>
+        <h3>${today.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase()}</h3>
+        <button class="nav-btn" onclick="changeMonth(1)"><i class="fas fa-chevron-right"></i></button>
+      </div>
+      
+      <div class="calendar-grid">
+        <div class="calendar-day-header">Dom</div>
+        <div class="calendar-day-header">Lun</div>
+        <div class="calendar-day-header">Mar</div>
+        <div class="calendar-day-header">Mié</div>
+        <div class="calendar-day-header">Jue</div>
+        <div class="calendar-day-header">Vie</div>
+        <div class="calendar-day-header">Sáb</div>
+        
+        ${generateCalendarDays(currentYear, currentMonth)}
+      </div>
     </div>
-    <div style="margin-bottom:12px;">
-      <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:4px;">Descripción / Pautas:</label>
-      <textarea id="manual-desc" placeholder="Instrucciones que dio el profesor..." style="width:100%; height:70px; background:rgba(0,0,0,0.4); border:1px solid var(--border-glass); border-radius:6px; color:#fff; padding:8px 10px; font-size:13px; outline:none; resize:none;"></textarea>
+    
+    <div class="upcoming-events">
+      <h3>Próximos Eventos</h3>
+      ${state.calendario.length === 0 ? `
+        <p class="empty-text">No hay eventos programados</p>
+      ` : `
+        <div class="events-list">
+          ${state.calendario.slice(0, 5).map(event => renderEventCard(event)).join('')}
+        </div>
+      `}
     </div>
-    <div style="margin-bottom:16px;">
-      <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:4px;">Fecha Límite:</label>
-      <input type="date" id="manual-date" style="width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--border-glass); border-radius:6px; color:#fff; padding:8px 10px; font-size:13px; outline:none;">
-    </div>
-    <button class="btn-prism btn-primary-cyan" style="width:100%;" onclick="saveManualTask()">
-      Guardar en Radar
-    </button>
   `;
-  modal.style.display = 'flex';
-};
+}
 
-window.saveManualTask = function() {
-  const title = document.getElementById('manual-title')?.value.trim();
-  const desc = document.getElementById('manual-desc')?.value.trim();
-  const date = document.getElementById('manual-date')?.value;
-
-  if (!title) {
-    alert('Ingresa al menos el título de la tarea.');
-    return;
+function generateCalendarDays(year, month) {
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = new Date();
+  
+  let html = '';
+  
+  // Días vacíos antes del primer día del mes
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div class="calendar-day empty"></div>';
   }
-
-  const newT = {
-    id: 'ASN-' + Date.now().toString().slice(-4),
-    courseId: 14739,
-    title: title,
-    description: desc || 'Asignación creada manualmente por Moisés.',
-    deadline: date ? new Date(date).toISOString() : new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    status: 'pending',
-    formats: ['PDF', 'Word']
-  };
-
-  state.assignments.unshift(newT);
-  localStorage.setItem('prisma_assignments', JSON.stringify(state.assignments));
-  closeModal();
-  showToast('✓ Tarea agregada al Radar.');
-  renderCurrentTab();
-};
-
-// ============================================================================
-// 6. VISTA CANALES & SINCRONIZADOR UNICA (BOOKMARKLET)
-// ============================================================================
-function renderChannelsView(container) {
-  const bookmarkletCode = "javascript:(function(){try{var courses=Array.from(document.querySelectorAll('.dashboard-card, .course-info-container, .coursename')).map(c=>c.innerText.trim()).filter(Boolean);alert('PRISMA Sync UNICA:\n\nCursos detectados: ' + (courses.length||1) + '\n\nSesión activa de Moisés González en UNICA verificada.');}catch(e){alert('Error al leer Moodle: '+e);}})();";
-
-  container.innerHTML = `
-    <div class="glass-card">
-      <div class="card-title-row">
-        <h2 class="card-title">💬 Canales & Sincronizador UNICA</h2>
+  
+  // Días del mes
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const isToday = date.toDateString() === today.toDateString();
+    const events = state.calendario.filter(e => {
+      const eventDate = new Date(e.fecha);
+      return eventDate.toDateString() === date.toDateString();
+    });
+    
+    html += `
+      <div class="calendar-day ${isToday ? 'today' : ''}" onclick="showDayEvents('${date.toISOString()}')">
+        <span class="day-number">${day}</span>
+        ${events.length > 0 ? `<div class="day-events-count">${events.length}</div>` : ''}
       </div>
-      <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:16px;">
-        Vínculos de comunicación y sincronizador para extraer información del campus sin intermediarios.
-      </p>
+    `;
+  }
+  
+  return html;
+}
 
-      <!-- Bookmarklet Sincronizador UNICA -->
-      <div style="background:rgba(0,240,255,0.08); border:1px solid rgba(0,240,255,0.3); border-radius:8px; padding:14px; margin-bottom:14px;">
-        <div style="font-weight:700; font-size:13.5px; color:var(--cyan-neon); margin-bottom:4px;">
-          ⚡ Botón de Sincronización Directa de Moodle UNICA
-        </div>
-        <p style="font-size:12px; color:var(--text-main); margin-bottom:10px; line-height:1.4;">
-          Para actualizar materias o notas directamente desde tu sesión de estudiante sin bloqueos de seguridad:
-        </p>
-        <a href="${bookmarkletCode}" class="btn-prism btn-primary-cyan" style="display:inline-block; font-size:12px; text-decoration:none;" onclick="alert('Arrastra este botón a la barra de marcadores de tu navegador. Cuando estés en el campus UNICA, haz clic en él para sincronizar.'); return false;">
-          ⭐ Arrastra este botón a tus Favoritos: "Sincronizar con Prisma"
-        </a>
+function renderEventCard(event) {
+  const eventDate = new Date(event.fecha);
+  const isUrgent = (eventDate - new Date()) < 3 * 24 * 60 * 60 * 1000;
+  
+  return `
+    <div class="event-card ${isUrgent ? 'urgent' : ''}">
+      <div class="event-date">
+        <span class="event-day">${eventDate.getDate()}</span>
+        <span class="event-month">${eventDate.toLocaleDateString('es-ES', { month: 'short' })}</span>
       </div>
-
-      <!-- Campus UNICA -->
-      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(0,240,255,0.2); border-radius:8px; padding:14px; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-weight:700; font-size:14px; color:#fff;">🏛️ Campus Virtual UNICA (Moodle)</div>
-            <div style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);">${UNICA_CONFIG.baseUrl}</div>
-          </div>
-          <span class="campus-status-pill">Conectado (ID: ${state.student.id})</span>
-        </div>
+      <div class="event-info">
+        <h4>${escapeHtml(event.titulo)}</h4>
+        <p>${escapeHtml(event.descripcion || '').substring(0, 50)}...</p>
       </div>
-
-      <!-- WhatsApp Group -->
-      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(16,185,129,0.2); border-radius:8px; padding:14px; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-weight:700; font-size:14px; color:#fff;">💬 WhatsApp Grupal (Taller Imagen Corporativa)</div>
-            <div style="font-size:12px; color:var(--text-muted);">Monitoreo de avisos y consignas del profesor</div>
-          </div>
-          <span class="campus-status-pill" style="background:rgba(16,185,129,0.15); color:var(--emerald-success);">Escuchando</span>
-        </div>
+      <div class="event-type">
+        <span class="type-badge">${event.tipo_evento}</span>
       </div>
     </div>
   `;
 }
 
 // ============================================================================
-// 7. VISTA SEGURIDAD & LICENCIAS
+// PANTALLA CANALES
 // ============================================================================
-function renderSecurityView(container) {
+function renderChannelsScreen(container) {
   container.innerHTML = `
-    <div class="glass-card">
-      <div class="card-title-row">
-        <h2 class="card-title">🛡️ Seguridad & Licenciamiento Comercial</h2>
-      </div>
-      <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:16px;">
-        Protección de propiedad intelectual con amarre de hardware (HWID).
-      </p>
-
-      <div style="background:rgba(0,0,0,0.4); border:1px solid var(--border-glass); border-radius:8px; padding:16px; margin-bottom:16px;">
-        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">HUELLA DIGITAL DE HARDWARE (HWID):</div>
-        <div style="font-family:var(--font-mono); font-size:12.5px; color:var(--cyan-neon); word-break:break-all; margin-bottom:12px;">
-          ${state.license.hwid}
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
-          <div><span style="color:var(--text-muted);">Titular:</span> <strong>${state.student.name}</strong></div>
-          <div><span style="color:var(--text-muted);">Plan:</span> <strong style="color:var(--emerald-success);">👑 Licencia Maestro</strong></div>
-        </div>
-      </div>
+    <div class="screen-header">
+      <h2>💬 Canales de Mensajería</h2>
+      <button class="secondary-button" onclick="openNewChannelModal()">
+        <i class="fas fa-plus"></i> Agregar Canal
+      </button>
     </div>
+    
+    ${state.canales.length === 0 ? `
+      <div class="empty-state">
+        <i class="fas fa-comments" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+        <h3>No hay canales configurados</h3>
+        <p>Conecta tus grupos de WhatsApp y Telegram para captura automática de tareas</p>
+        <button class="primary-button" onclick="openNewChannelModal()" style="margin-top: 1rem;">
+          Agregar Primer Canal
+        </button>
+      </div>
+    ` : `
+      <div class="channels-list">
+        ${state.canales.map(channel => renderChannelCard(channel)).join('')}
+      </div>
+    `}
   `;
 }
 
-// ============================================================================
-// MODAL DE REVISIÓN HUMAN IN THE LOOP (DESDE RADAR)
-// ============================================================================
-window.openApprovalModal = function(assignmentId) {
-  const assignment = state.assignments.find(a => a.id === assignmentId);
-  if (!assignment) return;
-
-  const modal = document.getElementById('modal-review');
-  const body = document.getElementById('modal-review-body');
-  if (!modal || !body) return;
-
-  state.activeGeneratedWork = assignment.workData || analyzePromptLocally(assignment.title + " " + assignment.description);
-
-  body.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
-      <div>
-        <span style="font-size:11px; text-transform:uppercase; color:var(--emerald-success); font-weight:700;">
-          Mesa de Aprobación de Moisés · Human in the Loop
+function renderChannelCard(channel) {
+  const isActive = channel.estado_monitor === 'Activo';
+  
+  return `
+    <div class="channel-card">
+      <div class="channel-icon">
+        <i class="fab fa-${channel.plataforma.toLowerCase() === 'whatsapp' ? 'whatsapp' : 'telegram'}"></i>
+      </div>
+      <div class="channel-info">
+        <h4>${escapeHtml(channel.nombre_grupo)}</h4>
+        <p>${channel.plataforma} · ${channel.tipo}</p>
+      </div>
+      <div class="channel-status">
+        <span class="status-badge ${isActive ? 'active' : 'inactive'}">
+          ${isActive ? 'Activo' : 'Inactivo'}
         </span>
-        <h2 style="font-size:18px; font-weight:800; color:#fff; margin-top:2px;">
-          ${escapeHtml(assignment.title)}
-        </h2>
       </div>
-      <button class="btn-prism btn-ghost" style="padding:6px 10px;" onclick="closeModal()">✕</button>
-    </div>
-
-    <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:14px;">
-      ${escapeHtml(assignment.description)}
-    </p>
-
-    <div style="font-size:12.5px; font-weight:700; color:#fff; margin-bottom:8px;">
-      📦 Descargar Archivos de esta Asignación:
-    </div>
-    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:18px;">
-      <button class="btn-prism btn-ghost" style="text-align:left; padding:8px 12px;" onclick="downloadDynamicFile('pdf')">
-        📄 Descargar Memoria Técnica Institucional (PDF / APA)
-      </button>
-      <button class="btn-prism btn-ghost" style="text-align:left; padding:8px 12px;" onclick="downloadDynamicFile('word')">
-        📝 Descargar Documento Word Editable (.doc)
-      </button>
-      <button class="btn-prism btn-ghost" style="text-align:left; padding:8px 12px;" onclick="downloadDynamicFile('illustrator')">
-        📐 Descargar Vectores de Retícula para Illustrator (.svg)
-      </button>
-      <button class="btn-prism btn-ghost" style="text-align:left; padding:8px 12px;" onclick="downloadDynamicFile('photoshop')">
-        🖼️ Descargar Script de Lienzo y Capas Photoshop (.jsx)
-      </button>
-      <button class="btn-prism btn-ghost" style="text-align:left; padding:8px 12px;" onclick="downloadDynamicFile('excel')">
-        📊 Descargar Presupuesto y Cronograma (.csv)
-      </button>
-    </div>
-
-    <div style="display:flex; gap:10px;">
-      <button class="btn-prism btn-ghost" style="flex:1;" onclick="closeModal()">
-        Cerrar
-      </button>
-      <button class="btn-prism btn-approve-submit" style="flex:2;" onclick="markAsSubmitted('${assignment.id}')">
-        🚀 Marcar como Entregado en UNICA
-      </button>
+      <div class="channel-actions">
+        <button class="action-btn" onclick="toggleChannelStatus('${channel.id}')">
+          <i class="fas fa-power-off"></i>
+        </button>
+        <button class="action-btn" onclick="deleteChannel('${channel.id}')">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
     </div>
   `;
+}
 
-  modal.style.display = 'flex';
-};
+// ============================================================================
+// PANTALLA MATERIAS
+// ============================================================================
+function renderCoursesScreen(container) {
+  container.innerHTML = `
+    <div class="screen-header">
+      <h2>📚 Materias Inscritas</h2>
+      <button class="secondary-button" onclick="openNewCourseModal()">
+        <i class="fas fa-plus"></i> Agregar Materia
+      </button>
+    </div>
+    
+    ${state.materias.length === 0 ? `
+      <div class="empty-state">
+        <i class="fas fa-book" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+        <h3>No hay materias inscritas</h3>
+        <p>Agrega tus materias o sincroniza con el campus universitario</p>
+        <button class="primary-button" onclick="syncCampus()" style="margin-top: 1rem;">
+          <i class="fas fa-sync-alt"></i> Sincronizar Campus
+        </button>
+      </div>
+    ` : `
+      <div class="courses-list">
+        ${state.materias.map(course => renderCourseCard(course)).join('')}
+      </div>
+    `}
+  `;
+}
 
-window.closeModal = function() {
-  const modal = document.getElementById('modal-review');
-  if (modal) modal.style.display = 'none';
-};
+function renderCourseCard(course) {
+  return `
+    <div class="course-card" style="border-left: 4px solid ${course.color || '#00f0ff'};">
+      <div class="course-header">
+        <h3>${escapeHtml(course.nombre)}</h3>
+        <span class="course-code">${escapeHtml(course.codigo)}</span>
+      </div>
+      <div class="course-body">
+        <p><strong>Profesor:</strong> ${escapeHtml(course.profesor)}</p>
+        <p><strong>Horario:</strong> ${escapeHtml(course.horario)}</p>
+        <p><strong>Aula:</strong> ${escapeHtml(course.aula)}</p>
+      </div>
+      <div class="course-footer">
+        <span class="course-status">${course.estado}</span>
+        <div class="course-actions">
+          <button class="action-btn" onclick="editCourse('${course.id}')">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button class="action-btn" onclick="deleteCourse('${course.id}')">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
-window.markAsSubmitted = function(id) {
-  const t = state.assignments.find(a => a.id === id);
-  if (t) {
-    t.status = 'submitted';
-    localStorage.setItem('prisma_assignments', JSON.stringify(state.assignments));
-    closeModal();
-    showToast('✓ Tarea marcada como entregada.');
-    renderCurrentTab();
+// ============================================================================
+// PANTALLA AJUSTES
+// ============================================================================
+function renderSettingsScreen(container) {
+  container.innerHTML = `
+    <div class="screen-header">
+      <h2>⚙️ Ajustes del Sistema</h2>
+    </div>
+    
+    <div class="settings-sections">
+      <div class="settings-section">
+        <h3>🔗 Conexión Backend</h3>
+        <div class="form-group">
+          <label>URL de la Web App (Google Apps Script)</label>
+          <input type="text" id="api-url-input" value="${PRISMA_CONFIG.API_URL}" placeholder="https://script.google.com/macros/s/...">
+        </div>
+        <button class="primary-button" onclick="saveApiUrl()">
+          <i class="fas fa-save"></i> Guardar URL
+        </button>
+        <p class="note">Deja vacío para usar modo local (sin backend).</p>
+      </div>
+      
+      <div class="settings-section">
+        <h3>🎨 Apariencia</h3>
+        <div class="theme-selector">
+          <button class="theme-btn ${state.theme === 'dark' ? 'active' : ''}" onclick="setTheme('dark')">
+            <i class="fas fa-moon"></i> Oscuro
+          </button>
+          <button class="theme-btn ${state.theme === 'light' ? 'active' : ''}" onclick="setTheme('light')">
+            <i class="fas fa-sun"></i> Claro
+          </button>
+        </div>
+      </div>
+      
+      <div class="settings-section">
+        <h3>🎓 Información del Estudiante</h3>
+        <div class="student-info">
+          <p><strong>Nombre:</strong> ${PRISMA_CONFIG.STUDENT_INFO.name}</p>
+          <p><strong>Cédula:</strong> ${PRISMA_CONFIG.STUDENT_INFO.cedula}</p>
+          <p><strong>Universidad:</strong> ${PRISMA_CONFIG.STUDENT_INFO.university}</p>
+          <p><strong>Facultad:</strong> ${PRISMA_CONFIG.STUDENT_INFO.faculty}</p>
+        </div>
+      </div>
+      
+      <div class="settings-section">
+        <h3>🔄 Sincronización</h3>
+        <button class="primary-button" onclick="syncCampus()">
+          <i class="fas fa-sync-alt"></i> Sincronizar con Campus UNICA
+        </button>
+        <button class="secondary-button" onclick="loadDashboardData()">
+          <i class="fas fa-refresh"></i> Recargar Datos Locales
+        </button>
+      </div>
+      
+      <div class="settings-section danger">
+        <h3>⚠️ Zona de Peligro</h3>
+        <button class="danger-button" onclick="clearAllData()">
+          <i class="fas fa-trash"></i> Borrar Todos los Datos
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function saveApiUrl() {
+  const url = document.getElementById('api-url-input').value.trim();
+  PRISMA_CONFIG.API_URL = url;
+  localStorage.setItem('prisma_api_url', url);
+  showToast('✓ URL de API guardada');
+}
+
+function setTheme(theme) {
+  state.theme = theme;
+  localStorage.setItem('prisma_theme', theme);
+  applyTheme(theme);
+  renderSettingsScreen(document.getElementById('screen'));
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const icon = document.getElementById('themeIcon');
+  if (icon) {
+    icon.className = theme === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
   }
-};
+}
 
-window.syncCampusUnica = function() {
-  showToast('🔄 Verificando campus UNICA...');
-  setTimeout(() => {
-    showToast('✓ Materia TALLER DE IMAGEN CORPORATIVA activa. 0 tareas nuevas.');
-  }, 1000);
-};
+function toggleTheme() {
+  const newTheme = state.theme === 'dark' ? 'light' : 'dark';
+  setTheme(newTheme);
+}
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+function clearAllData() {
+  Swal.fire({
+    title: '¿Borrar todos los datos?',
+    text: 'Esta acción eliminará toda la información local. No se puede deshacer.',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ef4444',
+    cancelButtonColor: '#64748b',
+    confirmButtonText: 'Sí, borrar todo',
+    cancelButtonText: 'Cancelar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      localStorage.clear();
+      window.location.reload();
+    }
+  });
+}
+
+// ============================================================================
+// FUNCIONES DE DATOS
+// ============================================================================
+function loadDashboardData() {
+  if (PRISMA_CONFIG.API_URL) {
+    // Cargar desde backend
+    fetch(PRISMA_CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'prisma_dashboard' })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.ok) {
+        state.materias = data.materias || [];
+        state.tareas = data.tareas || [];
+        state.calendario = data.calendario || [];
+        state.canales = data.canales || [];
+        state.configuracion = data.configuracion || {};
+        
+        // Guardar en localStorage
+        localStorage.setItem('prisma_materias', JSON.stringify(state.materias));
+        localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+        localStorage.setItem('prisma_calendario', JSON.stringify(state.calendario));
+        localStorage.setItem('prisma_canales', JSON.stringify(state.canales));
+        localStorage.setItem('prisma_configuracion', JSON.stringify(state.configuracion));
+        
+        updateBadges();
+        if (state.currentScreen) renderScreen(state.currentScreen);
+      }
+    })
+    .catch(err => {
+      console.error('Error cargando datos:', err);
+      showToast('Error de conexión. Usando datos locales.');
+    });
+  } else {
+    // Usar datos locales
+    updateBadges();
+  }
+}
+
+function updateBadges() {
+  updateBadge('tabBadgeRadar', state.tareas.filter(t => t.estado === 'Pendiente').length);
+  updateBadge('bellBadge', state.tareas.filter(t => {
+    if (!t.fecha_entrega) return false;
+    const daysUntilDue = Math.ceil((new Date(t.fecha_entrega) - new Date()) / (1000 * 60 * 60 * 24));
+    return daysUntilDue <= 3 && t.estado !== 'Entregada';
+  }).length);
+}
+
+function updateBadge(badgeId, count) {
+  const badge = document.getElementById(badgeId);
+  if (badge) {
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'flex' : 'none';
+  }
+}
+
+function syncCampus() {
+  showToast('🔄 Sincronizando con campus...');
+  
+  if (PRISMA_CONFIG.API_URL) {
+    fetch(PRISMA_CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'prisma_sync_campus' })
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.ok) {
+        showToast('✓ Sincronización completada');
+        loadDashboardData();
+      } else {
+        showToast('⚠️ ' + data.mensaje);
+      }
+    })
+    .catch(err => {
+      console.error('Error en sincronización:', err);
+      showToast('Error de conexión con campus');
+    });
+  } else {
+    showToast('Configure la URL del backend en ajustes');
+  }
+}
+
+// ============================================================================
+// FUNCIONES DE UTILIDAD
+// ============================================================================
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function showToast(message) {
-  let toast = document.getElementById('prisma-toast');
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.id = 'prisma-toast';
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(14, 20, 36, 0.95);
-      color: #00f0ff;
-      padding: 10px 18px;
-      border-radius: 9999px;
-      border: 1px solid rgba(0, 240, 255, 0.4);
-      font-size: 13px;
-      font-weight: 600;
-      box-shadow: 0 4px 20px rgba(0, 240, 255, 0.3);
-      z-index: 9999;
-      transition: opacity 0.3s ease;
-      text-align: center;
-      max-width: 90vw;
-    `;
-    document.body.appendChild(toast);
+  const toast = document.getElementById('toast');
+  if (toast) {
+    toast.textContent = message;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
   }
-  toast.textContent = message;
-  toast.style.opacity = '1';
-  toast.style.display = 'block';
+}
 
-  setTimeout(() => {
-    toast.style.opacity = '0';
+function toggleNotifications() {
+  const dropdown = document.getElementById('notifDropdown');
+  if (dropdown) {
+    dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+  }
+}
+
+function toggleSpotlight() {
+  const overlay = document.getElementById('prisma-spotlight-overlay');
+  const input = document.getElementById('spotlight-search');
+  
+  if (overlay) {
+    overlay.style.display = overlay.style.display === 'flex' ? 'none' : 'flex';
+    if (overlay.style.display === 'flex' && input) {
+      input.focus();
+    }
+  }
+}
+
+function closeAllModals() {
+  const modal = document.getElementById('modal');
+  if (modal) modal.close();
+  
+  const spotlight = document.getElementById('prisma-spotlight-overlay');
+  if (spotlight) spotlight.style.display = 'none';
+  
+  const notifDropdown = document.getElementById('notifDropdown');
+  if (notifDropdown) notifDropdown.style.display = 'none';
+}
+
+function openGuideModal() {
+  Swal.fire({
+    title: '📚 Guía de Uso PRISMA',
+    html: `
+      <div style="text-align: left; font-size: 14px;">
+        <p><strong>📡 Radar:</strong> Monitorea todas tus tareas académicas con prioridades y fechas límite.</p>
+        <p><strong>🎨 Estudio:</strong> Genera entregables académicos usando IA (Gemini) o motor local.</p>
+        <p><strong>📅 Calendario:</strong> Gestiona fechas de entregas, exámenes y eventos académicos.</p>
+        <p><strong>💬 Canales:</strong> Conecta WhatsApp/Telegram para captura automática de tareas.</p>
+        <p><strong>📚 Materias:</strong> Administra tus cursos inscritos y profesores.</p>
+        <p><strong>⚙️ Ajustes:</strong> Configura la conexión al backend y preferencias.</p>
+      </div>
+    `,
+    icon: 'info'
+  });
+}
+
+// ============================================================================
+// FUNCIONES DE MODALES (Placeholder)
+// ============================================================================
+function openNewTaskModal() {
+  Swal.fire({
+    title: '📝 Nueva Tarea',
+    html: `
+      <input id="swal-task-title" class="swal2-input" placeholder="Título de la tarea">
+      <textarea id="swal-task-desc" class="swal2-input" placeholder="Descripción"></textarea>
+      <select id="swal-task-priority" class="swal2-input">
+        <option value="Media">Prioridad Media</option>
+        <option value="Alta">Prioridad Alta</option>
+        <option value="Baja">Prioridad Baja</option>
+      </select>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Crear Tarea',
+    preConfirm: () => {
+      const title = document.getElementById('swal-task-title').value;
+      const desc = document.getElementById('swal-task-desc').value;
+      const priority = document.getElementById('swal-task-priority').value;
+      
+      if (!title) Swal.showValidationMessage('El título es requerido');
+      
+      return { title, desc, priority };
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const newTask = {
+        id: 'TAR-' + Date.now().toString().slice(-6),
+        titulo: result.value.title,
+        descripcion: result.value.desc,
+        prioridad: result.value.priority,
+        estado: 'Pendiente',
+        fecha_creacion: new Date().toISOString()
+      };
+      
+      state.tareas.unshift(newTask);
+      localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+      updateBadges();
+      renderScreen('radar');
+      showToast('✓ Tarea creada');
+    }
+  });
+}
+
+function openNewEventModal() {
+  Swal.fire({
+    title: '📅 Nuevo Evento',
+    html: `
+      <input id="swal-event-title" class="swal2-input" placeholder="Título del evento">
+      <input id="swal-event-date" type="date" class="swal2-input">
+      <select id="swal-event-type" class="swal2-input">
+        <option value="Tarea">Tarea</option>
+        <option value="Examen">Examen</option>
+        <option value="Clase">Clase</option>
+        <option value="Reunión">Reunión</option>
+      </select>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Crear Evento',
+    preConfirm: () => {
+      const title = document.getElementById('swal-event-title').value;
+      const date = document.getElementById('swal-event-date').value;
+      const type = document.getElementById('swal-event-type').value;
+      
+      if (!title) Swal.showValidationMessage('El título es requerido');
+      
+      return { title, date, type };
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const newEvent = {
+        id: 'CAL-' + Date.now().toString().slice(-6),
+        titulo: result.value.title,
+        fecha: result.value.date || new Date().toISOString().split('T')[0],
+        tipo_evento: result.value.type,
+        estado: 'Pendiente'
+      };
+      
+      state.calendario.push(newEvent);
+      localStorage.setItem('prisma_calendario', JSON.stringify(state.calendario));
+      renderScreen('calendar');
+      showToast('✓ Evento creado');
+    }
+  });
+}
+
+function openNewCourseModal() {
+  Swal.fire({
+    title: '📚 Nueva Materia',
+    html: `
+      <input id="swal-course-name" class="swal2-input" placeholder="Nombre de la materia">
+      <input id="swal-course-code" class="swal2-input" placeholder="Código (ej: TIC-14739)">
+      <input id="swal-course-prof" class="swal2-input" placeholder="Profesor">
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Agregar Materia',
+    preConfirm: () => {
+      const name = document.getElementById('swal-course-name').value;
+      const code = document.getElementById('swal-course-code').value;
+      const prof = document.getElementById('swal-course-prof').value;
+      
+      if (!name) Swal.showValidationMessage('El nombre es requerido');
+      
+      return { name, code, prof };
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const newCourse = {
+        id: 'MAT-' + Date.now().toString().slice(-6),
+        nombre: result.value.name,
+        codigo: result.value.code,
+        profesor: result.value.prof,
+        estado: 'Activa',
+        color: '#00f0ff'
+      };
+      
+      state.materias.push(newCourse);
+      localStorage.setItem('prisma_materias', JSON.stringify(state.materias));
+      renderScreen('courses');
+      showToast('✓ Materia agregada');
+    }
+  });
+}
+
+function openNewChannelModal() {
+  Swal.fire({
+    title: '💬 Nuevo Canal de Mensajería',
+    html: `
+      <div style="text-align: left; font-size: 13px;">
+        <p style="margin-bottom: 12px; color: var(--text-muted);">
+          <i class="fas fa-info-circle"></i> 
+          Conecta tus grupos de WhatsApp o Telegram para captura automática de tareas enviadas por profesores.
+        </p>
+        
+        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Plataforma</label>
+        <select id="swal-channel-platform" class="swal2-input" style="width: 100%; margin-bottom: 12px;">
+          <option value="WhatsApp">WhatsApp</option>
+          <option value="Telegram">Telegram</option>
+        </select>
+        
+        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Nombre del grupo</label>
+        <input id="swal-channel-name" class="swal2-input" placeholder="Ej: Taller de Imagen Corporativa" style="width: 100%; margin-bottom: 12px;">
+        
+        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Tipo de grupo</label>
+        <select id="swal-channel-type" class="swal2-input" style="width: 100%; margin-bottom: 12px;">
+          <option value="Materias">Materias (cátedra)</option>
+          <option value="General">General (varias materias)</option>
+          <option value="Notificaciones">Solo notificaciones</option>
+        </select>
+        
+        <label style="display: block; margin-bottom: 4px; font-weight: 600;">Materia relacionada (opcional)</label>
+        <select id="swal-channel-course" class="swal2-input" style="width: 100%; margin-bottom: 12px;">
+          <option value="">Sin materia específica</option>
+          ${state.materias.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('')}
+        </select>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Agregar Canal',
+    width: 500,
+    preConfirm: () => {
+      const platform = document.getElementById('swal-channel-platform').value;
+      const name = document.getElementById('swal-channel-name').value;
+      const type = document.getElementById('swal-channel-type').value;
+      const courseId = document.getElementById('swal-channel-course').value;
+      
+      if (!name) Swal.showValidationMessage('El nombre del grupo es requerido');
+      
+      return { platform, name, type, courseId };
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const newChannel = {
+        id: 'CAN-' + Date.now().toString().slice(-6),
+        plataforma: result.value.platform,
+        nombre_grupo: result.value.name,
+        tipo: result.value.type,
+        materia_relacionada: result.value.courseId || '',
+        estado_monitor: 'Inactivo',
+        ultima_sincronizacion: null,
+        mensaje_capturado: '',
+        fecha_mensaje: null,
+        procesado: 'No',
+        tarea_generada_id: ''
+      };
+      
+      state.canales.push(newChannel);
+      localStorage.setItem('prisma_canales', JSON.stringify(state.canales));
+      
+      // Guardar en backend si está configurado
+      if (PRISMA_CONFIG.API_URL) {
+        fetch(PRISMA_CONFIG.API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'prisma_save_channel',
+            ...newChannel
+          })
+        }).catch(err => console.error('Error guardando canal en backend:', err));
+      }
+      
+      renderScreen('channels');
+      showToast('✓ Canal agregado correctamente');
+    }
+  });
+}
+
+// Funciones placeholder para acciones que se implementarán completamente
+function updateTaskStatus(taskId, newStatus) {
+  const task = state.tareas.find(t => t.id === taskId);
+  if (task) {
+    task.estado = newStatus;
+    task.ultima_actualizacion = new Date().toISOString();
+    localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+    updateBadges();
+    renderScreen('radar');
+    showToast(`✓ Tarea actualizada a ${formatStatus(newStatus)}`);
+  }
+}
+
+function generateForTask(taskId) {
+  const task = state.tareas.find(t => t.id === taskId);
+  if (task) {
+    // Navegar al estudio con las pautas de la tarea
+    navigate('studio');
     setTimeout(() => {
-      toast.style.display = 'none';
-    }, 300);
-  }, 3000);
+      const promptArea = document.getElementById('studio-prompt');
+      if (promptArea) {
+        promptArea.value = task.instrucciones || task.descripcion || task.titulo;
+      }
+    }, 100);
+  }
+}
+
+function toggleChannelStatus(channelId) {
+  const channel = state.canales.find(c => c.id === channelId);
+  if (channel) {
+    channel.estado_monitor = channel.estado_monitor === 'Activo' ? 'Inactivo' : 'Activo';
+    channel.ultima_sincronizacion = new Date().toISOString();
+    localStorage.setItem('prisma_canales', JSON.stringify(state.canales));
+    
+    // Actualizar en backend si está configurado
+    if (PRISMA_CONFIG.API_URL) {
+      fetch(PRISMA_CONFIG.API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'prisma_save_channel',
+          id: channel.id,
+          estado_monitor: channel.estado_monitor,
+          ultima_sincronizacion: channel.ultima_sincronizacion
+        })
+      }).catch(err => console.error('Error actualizando canal en backend:', err));
+    }
+    
+    renderScreen('channels');
+    showToast(`✓ Canal ${channel.estado_monitor === 'Activo' ? 'activado' : 'desactivado'}`);
+  }
+}
+
+function processChannelMessage(channelId) {
+  const channel = state.canales.find(c => c.id === channelId);
+  if (!channel) return;
+  
+  Swal.fire({
+    title: '📝 Procesar Mensaje del Canal',
+    html: `
+      <div style="text-align: left;">
+        <p><strong>Canal:</strong> ${channel.nombre_grupo}</p>
+        <p><strong>Plataforma:</strong> ${channel.plataforma}</p>
+        
+        <label style="display: block; margin-top: 12px; font-weight: 600;">Pega el mensaje del profesor:</label>
+        <textarea id="swal-message-text" class="swal2-input" rows="6" 
+          placeholder="Ej: 'Recuerden que para el próximo lunes deben entregar el ensayo sobre semiótica...'"></textarea>
+        
+        <label style="display: block; margin-top: 12px; font-weight: 600;">Materia (opcional):</label>
+        <select id="swal-message-course" class="swal2-input">
+          <option value="">Detectar automáticamente</option>
+          ${state.materias.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('')}
+        </select>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Procesar y Crear Tarea',
+    width: 500,
+    preConfirm: () => {
+      const messageText = document.getElementById('swal-message-text').value;
+      const courseId = document.getElementById('swal-message-course').value;
+      
+      if (!messageText) Swal.showValidationMessage('El mensaje es requerido');
+      
+      return { messageText, courseId };
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const message = result.value.messageText;
+      const courseId = result.value.courseId;
+      
+      // Analizar el mensaje para detectar si es una tarea
+      const taskKeywords = ['tarea', 'trabajo', 'entrega', 'deber', 'proyecto', 'informe', 'ensayo', 'exposición', 'presentación'];
+      const isTask = taskKeywords.some(keyword => message.toLowerCase().includes(keyword));
+      
+      if (!isTask) {
+        Swal.fire('Info', 'El mensaje no parece contener una tarea académica. No se creará ninguna tarea automáticamente.', 'info');
+        return;
+      }
+      
+      // Extraer información básica
+      const title = message.substring(0, 60) + '...';
+      const description = message;
+      
+      // Determinar materia
+      let selectedCourse = null;
+      if (courseId) {
+        selectedCourse = state.materias.find(m => m.id === courseId);
+      } else {
+        // Intentar detectar materia del mensaje
+        selectedCourse = state.materias.find(m => 
+          message.toLowerCase().includes(m.nombre.toLowerCase()) ||
+          message.toLowerCase().includes(m.codigo?.toLowerCase())
+        );
+      }
+      
+      // Crear tarea
+      const newTask = {
+        id: 'TAR-' + Date.now().toString().slice(-6),
+        materia_id: selectedCourse?.id || '',
+        materia_nombre: selectedCourse?.nombre || 'Sin materia especificada',
+        titulo: title,
+        descripcion: description,
+        tipo: 'Proyecto',
+        prioridad: 'Media',
+        estado: 'Pendiente',
+        formatos_requeridos: 'PDF',
+        fuente: `${channel.plataforma} - ${channel.nombre_grupo}`,
+        fecha_creacion: new Date().toISOString(),
+        instrucciones: message
+      };
+      
+      state.tareas.unshift(newTask);
+      localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+      
+      // Actualizar canal
+      channel.mensaje_capturado = message;
+      channel.fecha_mensaje = new Date().toISOString();
+      channel.procesado = 'Sí';
+      channel.tarea_generada_id = newTask.id;
+      localStorage.setItem('prisma_canales', JSON.stringify(state.canales));
+      
+      // Guardar en backend si está configurado
+      if (PRISMA_CONFIG.API_URL) {
+        // Guardar tarea
+        fetch(PRISMA_CONFIG.API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'prisma_save_assignment',
+            ...newTask
+          })
+        }).catch(err => console.error('Error guardando tarea en backend:', err));
+        
+        // Actualizar canal
+        fetch(PRISMA_CONFIG.API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'prisma_save_channel',
+            id: channel.id,
+            mensaje_capturado: message,
+            fecha_mensaje: new Date().toISOString(),
+            procesado: 'Sí',
+            tarea_generada_id: newTask.id
+          })
+        }).catch(err => console.error('Error actualizando canal en backend:', err));
+      }
+      
+      updateBadges();
+      renderScreen('channels');
+      
+      Swal.fire({
+        title: '✓ Tarea Creada Exitosamente',
+        html: `
+          <div style="text-align: left;">
+            <p><strong>Título:</strong> ${title}</p>
+            <p><strong>Materia:</strong> ${selectedCourse?.nombre || 'Detectada automáticamente'}</p>
+            <p><strong>Fuente:</strong> ${channel.plataforma} - ${channel.nombre_grupo}</p>
+          </div>
+        `,
+        icon: 'success'
+      }).then(() => {
+        navigate('radar');
+      });
+    }
+  });
+}
+
+function deleteChannel(channelId) {
+  Swal.fire({
+    title: '¿Eliminar canal?',
+    text: 'Esta acción no se puede deshacer',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ef4444',
+    confirmButtonText: 'Eliminar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      state.canales = state.canales.filter(c => c.id !== channelId);
+      localStorage.setItem('prisma_canales', JSON.stringify(state.canales));
+      renderScreen('channels');
+      showToast('✓ Canal eliminado');
+    }
+  });
+}
+
+function editCourse(courseId) {
+  const course = state.materias.find(c => c.id === courseId);
+  if (course) {
+    Swal.fire({
+      title: '✏️ Editar Materia',
+      html: `
+        <input id="swal-edit-name" class="swal2-input" value="${course.nombre}">
+        <input id="swal-edit-code" class="swal2-input" value="${course.codigo}">
+        <input id="swal-edit-prof" class="swal2-input" value="${course.profesor}">
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Guardar',
+      preConfirm: () => {
+        return {
+          nombre: document.getElementById('swal-edit-name').value,
+          codigo: document.getElementById('swal-edit-code').value,
+          profesor: document.getElementById('swal-edit-prof').value
+        };
+      }
+    }).then((result) => {
+      if (result.isConfirmed) {
+        course.nombre = result.value.nombre;
+        course.codigo = result.value.codigo;
+        course.profesor = result.value.profesor;
+        localStorage.setItem('prisma_materias', JSON.stringify(state.materias));
+        renderScreen('courses');
+        showToast('✓ Materia actualizada');
+      }
+    });
+  }
+}
+
+function deleteCourse(courseId) {
+  Swal.fire({
+    title: '¿Eliminar materia?',
+    text: 'Esta acción no se puede deshacer',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ef4444',
+    confirmButtonText: 'Eliminar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      state.materias = state.materias.filter(c => c.id !== courseId);
+      localStorage.setItem('prisma_materias', JSON.stringify(state.materias));
+      renderScreen('courses');
+      showToast('✓ Materia eliminada');
+    }
+  });
+}
+
+function openTaskDetailModal(taskId) {
+  const task = state.tareas.find(t => t.id === taskId);
+  if (task) {
+    Swal.fire({
+      title: task.titulo,
+      html: `
+        <div style="text-align: left;">
+          <p><strong>Materia:</strong> ${task.materia_nombre || 'No asignada'}</p>
+          <p><strong>Estado:</strong> ${formatStatus(task.estado)}</p>
+          <p><strong>Prioridad:</strong> ${task.prioridad}</p>
+          <p><strong>Tipo:</strong> ${task.tipo || 'Proyecto'}</p>
+          <p><strong>Descripción:</strong></p>
+          <p style="background: rgba(0,0,0,0.05); padding: 10px; border-radius: 8px;">${task.descripcion || 'Sin descripción'}</p>
+          ${task.fecha_entrega ? `<p><strong>Fecha entrega:</strong> ${new Date(task.fecha_entrega).toLocaleDateString()}</p>` : ''}
+        </div>
+      `,
+      width: 600
+    });
+  }
+}
+
+function showDayEvents(dateIso) {
+  const date = new Date(dateIso);
+  const events = state.calendario.filter(e => {
+    const eventDate = new Date(e.fecha);
+    return eventDate.toDateString() === date.toDateString();
+  });
+  
+  if (events.length === 0) {
+    Swal.fire({
+      title: date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }),
+      text: 'No hay eventos programados',
+      icon: 'info'
+    });
+  } else {
+    Swal.fire({
+      title: date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }),
+      html: events.map(e => `
+        <div style="text-align: left; margin-bottom: 10px; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 8px;">
+          <strong>${e.titulo}</strong><br>
+          <small>${e.tipo_evento}</small>
+        </div>
+      `).join(''),
+      width: 500
+    });
+  }
+}
+
+function changeMonth(delta) {
+  // Implementación básica de cambio de mes
+  // En una versión completa, esto actualizaría el calendario
+  showToast('📅 Navegación de calendario (próximamente)');
 }
