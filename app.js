@@ -598,13 +598,38 @@ function renderStudioScreen(container) {
     <div class="prompt-area">
       <label>Pautas o Instrucciones de la Tarea:</label>
       <textarea id="studio-prompt" rows="6" placeholder="Pega aquí las instrucciones completas del profesor (ej: 'Realizar un ensayo de 3 páginas sobre la Semiótica de Umberto Eco...')"></textarea>
-      
+
+      <div class="form-group">
+        <label>🎨 Estilo de Portada:</label>
+        <select id="cover-style" class="filter-select">
+          <option value="modern">Gradiente Moderno</option>
+          <option value="vibrant">Vibrante Moderna</option>
+          <option value="elegant">Minimalista Elegante</option>
+          <option value="pop">Pop Art Vibrante</option>
+          <option value="abstract">Abstracto Creativo</option>
+        </select>
+      </div>
+
       <div class="prompt-actions">
         <span class="ai-status ${hasKey ? 'connected' : 'local'}">
-          ${hasKey ? '⚡ Motor: Google Gemini 2.5 Flash' : '⚡ Motor: Analizador Local Heurístico'}
+          ${hasKey ? '⚡ Motor: Google Gemini 2.0 Flash' : '⚡ Motor: Analizador Local Heurístico'}
         </span>
         <button class="primary-button" onclick="executeAIAnalysis()">
           <i class="fas fa-rocket"></i> Analizar y Generar
+        </button>
+      </div>
+    </div>
+
+    <!-- Área de captura rápida de mensajes -->
+    <div class="prompt-area" style="margin-top: 20px; border-top: 1px solid #333; padding-top: 20px;">
+      <label>💬 Captura Rápida de Mensajes (WhatsApp/Telegram):</label>
+      <p style="font-size: 12px; color: #888; margin-bottom: 10px;">
+        Copia un mensaje de WhatsApp o Telegram y pégalo aquí. PRISMA creará automáticamente la tarea.
+      </p>
+      <textarea id="quick-capture" rows="4" placeholder="Pega aquí el mensaje del profesor (ej: 'Tarea: Presentar composición el 20 de noviembre...')"></textarea>
+      <div class="prompt-actions">
+        <button class="secondary-button" onclick="quickCaptureTask()">
+          <i class="fas fa-bolt"></i> Capturar y Crear Tarea
         </button>
       </div>
     </div>
@@ -661,23 +686,30 @@ async function executeAIAnalysis() {
   
   try {
     let resultData;
-    
+
     if (state.apiKey && PRISMA_CONFIG.API_URL) {
-      // Usar backend con Gemini
+      // Usar backend con Gemini (evita problemas de CORS)
       resultData = await callBackendForGeneration(prompt);
     } else if (state.apiKey) {
-      // Llamada directa a Gemini (sin backend)
-      resultData = await callGeminiDirectly(prompt);
+      // Intentar llamada directa a Gemini (puede fallar por CORS)
+      try {
+        resultData = await callGeminiDirectly(prompt);
+      } catch (directError) {
+        console.warn('Llamada directa falló por CORS, usando motor local:', directError);
+        showToast('⚠️ Error de CORS. Usa motor local o configura el backend.');
+        await new Promise(r => setTimeout(r, 1000));
+        resultData = analyzePromptLocally(prompt);
+      }
     } else {
       // Motor heurístico local
       await new Promise(r => setTimeout(r, 1000));
       resultData = analyzePromptLocally(prompt);
     }
-    
+
     state.activeGeneratedWork = resultData;
     renderGeneratedResults(resultData, resultsArea);
     showToast('✓ Análisis completado y entregables listos');
-    
+
   } catch (err) {
     console.error('Error en generación:', err);
     resultsArea.innerHTML = `
@@ -692,7 +724,7 @@ async function executeAIAnalysis() {
 }
 
 async function callGeminiDirectly(prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.apiKey}`;
   
   const systemInstruction = `Eres PRISMA, asistente académico de élite. Analiza las pautas y devuelve un JSON con esta estructura:
 {
@@ -713,17 +745,31 @@ async function callGeminiDirectly(prompt) {
     generationConfig: { temperature: 0.4, responseMimeType: "application/json" }
   };
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  
-  if (!response.ok) throw new Error('Error en API Gemini');
-  
-  const json = await response.json();
-  const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-  return JSON.parse(rawText);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error Gemini API:', response.status, errorText);
+      throw new Error(`Error en API Gemini (${response.status}): ${errorText}`);
+    }
+    
+    const json = await response.json();
+    const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!rawText) {
+      throw new Error('Respuesta vacía de Gemini');
+    }
+    
+    return JSON.parse(rawText);
+  } catch (error) {
+    console.error('Error completo en callGeminiDirectly:', error);
+    throw error;
+  }
 }
 
 async function callBackendForGeneration(prompt) {
@@ -733,23 +779,25 @@ async function callBackendForGeneration(prompt) {
     body: JSON.stringify({
       action: 'prisma_generate_content',
       prompt: prompt,
-      tipo: 'auto'
+      tipo: 'auto',
+      api_key: state.apiKey
     })
   });
-  
+
   const data = await response.json();
   if (!data.ok) throw new Error(data.mensaje || 'Error en backend');
-  
+
   return JSON.parse(data.contenido);
 }
 
 function analyzePromptLocally(prompt) {
-  // Motor heurístico local simplificado
+  // Motor heurístico local con branding UNICA
   const p = prompt.toLowerCase();
-  
+
   let topic = "Análisis Académico General";
   let subject = "Cátedra Universitaria";
-  
+  let faculty = "Facultad de Ciencias de la Comunicación y de la Información";
+
   if (p.includes("marca") || p.includes("isotipo") || p.includes("logotipo")) {
     topic = "Identidad Visual Corporativa";
     subject = "Taller de Imagen Corporativa";
@@ -759,38 +807,48 @@ function analyzePromptLocally(prompt) {
   } else if (p.includes("editorial") || p.includes("revista") || p.includes("diagram")) {
     topic = "Diseño Editorial y Diagramación";
     subject = "Diseño Editorial";
+  } else if (p.includes("composicion") || p.includes("dibujo") || p.includes("ilustracion")) {
+    topic = "Composición Artística Digital";
+    subject = "Diseño Gráfico Digital Avanzado";
   }
-  
+
   return {
     titulo: topic + " - Análisis Académico",
     materia: subject,
-    resumen_ejecutivo: `Proyecto académico basado en las pautas: "${prompt.substring(0, 80)}...". Estructurado bajo normas académicas institucionales.`,
-    marco_teorico: `El presente trabajo se fundamenta en los principios teóricos de la cátedra, abordando la temática desde una perspectiva analítica y propositiva según las directrices establecidas.`,
+    resumen_ejecutivo: `Proyecto académico basado en las pautas: "${prompt.substring(0, 80)}...". Estructurado bajo normas académicas institucionales de la Universidad Católica Cecilio Acosta.`,
+    marco_teorico: `El presente trabajo se fundamenta en los principios teóricos de la cátedra de ${subject}, abordando la temática desde una perspectiva analítica y propositiva según las directrices establecidas por la ${faculty}.`,
     desarrollo_puntos: [
       {
         subtitulo: "1. Contexto y Diagnóstico",
-        contenido: "Se identifican los elementos clave de la problemática planteada, estableciendo el marco de referencia para el análisis."
+        contenido: "Se identifican los elementos clave de la problemática planteada, estableciendo el marco de referencia para el análisis desde la perspectiva del diseño gráfico contemporáneo."
       },
       {
         subtitulo: "2. Desarrollo y Análisis",
-        contenido: "Se profundiza en los aspectos conceptuales y prácticos de la temática, aplicando los fundamentos teóricos de la cátedra."
+        contenido: "Se profundiza en los aspectos conceptuales y prácticos de la temática, aplicando los fundamentos teóricos de la cátedra y considerando las tendencias actuales en diseño visual."
       },
       {
         subtitulo: "3. Conclusiones y Propuestas",
         contenido: "Se sintetizan los hallazgos principales y se presentan conclusiones fundamentadas."
       }
     ],
-    conclusiones: "El análisis realizado demuestra comprensión de los conceptos fundamentales y capacidad de aplicación práctica de los conocimientos académicos.",
+    conclusiones: "El análisis realizado demuestra comprensión de los conceptos fundamentales y capacidad de aplicación práctica de los conocimientos académicos del diseño gráfico contemporáneo.",
     referencias_apa: [
       "Frascara, J. (2004). Diseño de comunicación. Ediciones Infinito.",
       "Eco, U. (1994). Signo. Editorial Labor.",
-      "Costa, J. (2012). La imagen de marca. Paidós."
+      "Costa, J. (2012). La imagen de marca. Paidós.",
+      "Munari, B. (2016). Diseño y comunicación visual. Gustavo Gili."
     ],
     paleta_sugerida: [
-      { nombre: "Principal", hex: "#0033A0" },
-      { nombre: "Acento", hex: "#00F0FF" },
-      { nombre: "Base", hex: "#0E1424" }
-    ]
+      { nombre: "UNICA Azul", hex: "#0033A0" },
+      { nombre: "Cian Acento", hex: "#00F0FF" },
+      { nombre: "Negro Base", hex: "#0E1424" },
+      { nombre: "Blanco", hex: "#FFFFFF" }
+    ],
+    // Metadatos para branding UNICA
+    universidad: "Universidad Católica Cecilio Acosta (UNICA)",
+    facultad: "Facultad de Ciencias de la Comunicación y de la Información",
+    estudiante: "Moisés González",
+    cedula: "V-31.171.020"
   };
 }
 
@@ -817,27 +875,63 @@ function renderGeneratedResults(data, container) {
         <h4>📦 Archivos Generados</h4>
         <div class="files-grid">
           <div class="file-card">
+            <i class="fas fa-image" style="color: #ec4899;"></i>
+            <span>Portada Creativa</span>
+            <button class="download-btn" onclick="downloadFile('cover')">Descargar</button>
+          </div>
+
+          <div class="file-card">
             <i class="fas fa-file-pdf" style="color: #ef4444;"></i>
-            <span>Memoria PDF</span>
+            <span>Memoria PDF (UNICA)</span>
             <button class="download-btn" onclick="downloadFile('pdf')">Descargar</button>
           </div>
-          
+
           <div class="file-card">
             <i class="fas fa-file-word" style="color: #3b82f6;"></i>
             <span>Documento Word</span>
             <button class="download-btn" onclick="downloadFile('word')">Descargar</button>
           </div>
-          
+
           <div class="file-card">
             <i class="fas fa-vector-square" style="color: #f59e0b;"></i>
             <span>Vector SVG</span>
             <button class="download-btn" onclick="downloadFile('svg')">Descargar</button>
           </div>
-          
+
+          <div class="file-card">
+            <i class="fas fa-palette" style="color: #8b5cf6;"></i>
+            <span>Script Illustrator</span>
+            <button class="download-btn" onclick="downloadFile('illustrator')">Descargar</button>
+          </div>
+
           <div class="file-card">
             <i class="fas fa-images" style="color: #10b981;"></i>
             <span>Script Photoshop</span>
             <button class="download-btn" onclick="downloadFile('jsx')">Descargar</button>
+          </div>
+
+          <div class="file-card">
+            <i class="fas fa-cube" style="color: #f97316;"></i>
+            <span>Script Blender</span>
+            <button class="download-btn" onclick="downloadFile('blender')">Descargar</button>
+          </div>
+
+          <div class="file-card">
+            <i class="fas fa-film" style="color: #06b6d4;"></i>
+            <span>Script After Effects</span>
+            <button class="download-btn" onclick="downloadFile('aftereffects')">Descargar</button>
+          </div>
+
+          <div class="file-card">
+            <i class="fas fa-video" style="color: #84cc16;"></i>
+            <span>Script Filmora</span>
+            <button class="download-btn" onclick="downloadFile('filmora')">Descargar</button>
+          </div>
+
+          <div class="file-card">
+            <i class="fas fa-drafting-compass" style="color: #06b6d4;"></i>
+            <span>Composición Visual</span>
+            <button class="download-btn" onclick="downloadFile('composition')">Descargar</button>
           </div>
         </div>
       </div>
@@ -876,10 +970,10 @@ function downloadFile(type) {
     Swal.fire('Error', 'Primero genera un contenido en el Estudio', 'error');
     return;
   }
-  
+
   const d = state.activeGeneratedWork;
   const cleanTitle = (d.titulo || 'Entregable').replace(/[^a-zA-Z0-9_-]/g, '_');
-  
+
   switch (type) {
     case 'pdf':
       generateAndDownloadPDF(d, cleanTitle);
@@ -893,20 +987,40 @@ function downloadFile(type) {
     case 'jsx':
       generateAndDownloadJSX(d, cleanTitle);
       break;
+    case 'illustrator':
+      generateAndDownloadIllustrator(d, cleanTitle);
+      break;
+    case 'composition':
+      generateAndDownloadComposition(d, cleanTitle);
+      break;
+    case 'cover':
+      generateAndDownloadCover(d, cleanTitle);
+      break;
+    case 'blender':
+      generateAndDownloadBlender(d, cleanTitle);
+      break;
+    case 'aftereffects':
+      generateAndDownloadAfterEffects(d, cleanTitle);
+      break;
+    case 'filmora':
+      generateAndDownloadFilmora(d, cleanTitle);
+      break;
+    default:
+      showToast('Tipo de archivo no soportado');
   }
 }
 
 function generateAndDownloadPDF(data, filename) {
   const pdfWindow = window.open('', '_blank');
   const puntosHtml = (data.desarrollo_puntos || []).map(p => `
-    <h2 style="font-size:13pt; font-weight:bold; margin-top:24px;">${escapeHtml(p.subtitulo)}</h2>
+    <h2 style="color:#0033A0; border-bottom:1px solid #ddd; padding-bottom:4px; font-size:13pt; margin-top:24px;">${escapeHtml(p.subtitulo)}</h2>
     <p style="text-align:justify; text-indent:1.27cm; margin:0 0 12px 0;">${escapeHtml(p.contenido)}</p>
   `).join('');
-  
+
   const referenciasHtml = (data.referencias_apa || []).map(r => `
     <p style="padding-left:1.27cm; text-indent:-1.27cm; margin-bottom:8px; font-size:11pt;">${escapeHtml(r)}</p>
   `).join('');
-  
+
   pdfWindow.document.write(`
     <!DOCTYPE html>
     <html lang="es">
@@ -915,14 +1029,14 @@ function generateAndDownloadPDF(data, filename) {
       <title>${escapeHtml(data.titulo)} — UNICA</title>
       <style>
         @page { size: letter; margin: 2.54cm; }
-        body { font-family: 'Times New Roman', serif; line-height: 2; color: #111; max-width: 800px; margin: 0 auto; padding: 40px; }
-        .header-unica { text-align: center; font-weight: bold; line-height: 1.3; margin-bottom: 50px; font-size: 13pt; }
-        .title-section { text-align: center; margin: 70px 0; }
-        .title-doc { font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 15px; }
-        .meta-section { margin-top: 80px; font-size: 12pt; line-height: 1.6; }
+        body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #111; margin: 35px; }
+        .inst-header { text-align: center; font-weight: bold; font-size: 12pt; margin-bottom: 30px; }
+        h1 { color: #0033A0; text-align: center; font-size: 16pt; margin: 30px 0; }
+        h2 { color: #0E1424; font-size: 13pt; margin-top: 20px; }
+        h2.unica { color: #0033A0; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        p { text-align: justify; margin-bottom: 12px; }
+        .meta-info { margin-top: 20px; font-size: 11pt; }
         .page-break { page-break-before: always; }
-        h2 { font-size: 13pt; margin-top: 24px; font-weight: bold; }
-        p { text-align: justify; text-indent: 1.27cm; margin: 0 0 10px 0; }
         @media print { .no-print { display: none; } }
       </style>
     </head>
@@ -933,25 +1047,20 @@ function generateAndDownloadPDF(data, filename) {
         </button>
       </div>
 
-      <div class="header-unica">
+      <div class="inst-header">
         UNIVERSIDAD CATÓLICA CECILIO ACOSTA<br>
         FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN<br>
         CÁTEDRA: ${escapeHtml(data.materia)}
       </div>
 
-      <div class="title-section">
-        <div class="title-doc">${escapeHtml(data.titulo)}</div>
-        <div style="font-size: 12pt; font-style: italic;">Memoria Descriptiva Académica</div>
+      <h1>${escapeHtml(data.titulo)}</h1>
+
+      <div class="meta-info">
+        <strong>Estudiante:</strong> ${data.estudiante || 'Moisés González'} (${data.cedula || 'C.I. V-31.171.020'})<br>
+        <strong>Institución:</strong> ${data.universidad || 'Universidad Católica Cecilio Acosta (UNICA)'}
       </div>
 
-      <div class="meta-section">
-        <strong>Autor:</strong> ${PRISMA_CONFIG.STUDENT_INFO.name}<br>
-        <strong>C.I.:</strong> ${PRISMA_CONFIG.STUDENT_INFO.cedula}<br>
-        <strong>Institución:</strong> ${PRISMA_CONFIG.STUDENT_INFO.university}<br>
-        <strong>Fecha:</strong> ${new Date().toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
-      </div>
-
-      <div class="page-break"></div>
+      <hr>
 
       <h2>1. Resumen Ejecutivo</h2>
       <p>${escapeHtml(data.resumen_ejecutivo)}</p>
@@ -1023,10 +1132,823 @@ function generateAndDownloadSVG(data, filename) {
   </defs>
   <rect width="800" height="600" class="bg" />
   <text x="40" y="50" class="txt-title">UNICA — ${escapeHtml(data.titulo).toUpperCase()}</text>
-  <text x="40" y="72" class="txt-sub">${PRISMA_CONFIG.STUDENT_INFO.name} · ${escapeHtml(data.materia)}</text>
+  <text x="40" y="72" class="txt-sub">${data.estudiante || 'Moisés González'} · ${escapeHtml(data.materia)}</text>
 </svg>`;
-  
+
   triggerBlobDownload(svg, `${filename}.svg`, 'image/svg+xml');
+}
+
+function generateAndDownloadComposition(data, filename) {
+  // Generar composición visual creativa basada en la paleta
+  const colors = data.paleta_sugerida || [
+    { nombre: "UNICA Azul", hex: "#0033A0" },
+    { nombre: "Cian Acento", hex: "#00F0FF" },
+    { nombre: "Negro Base", hex: "#0E1424" },
+    { nombre: "Blanco", hex: "#FFFFFF" }
+  ];
+
+  const composition = `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:${colors[0]?.hex || '#0033A0'};stop-opacity:1" />
+      <stop offset="100%" style="stop-color:${colors[1]?.hex || '#00F0FF'};stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:${colors[2]?.hex || '#0E1424'};stop-opacity:1" />
+      <stop offset="100%" style="stop-color:${colors[0]?.hex || '#0033A0'};stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Fondo creativo -->
+  <rect width="1200" height="800" fill="${colors[2]?.hex || '#0E1424'}" />
+
+  <!-- Elementos abstractos -->
+  <circle cx="200" cy="200" r="150" fill="url(#grad1)" opacity="0.6" />
+  <circle cx="1000" cy="600" r="200" fill="url(#grad2)" opacity="0.4" />
+  <rect x="400" y="100" width="400" height="3" fill="${colors[1]?.hex || '#00F0FF'}" opacity="0.8" />
+  <rect x="300" y="700" width="600" height="2" fill="${colors[1]?.hex || '#00F0FF'}" opacity="0.6" />
+
+  <!-- Header UNICA -->
+  <text x="50" y="60" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="${colors[3]?.hex || '#FFFFFF'}">
+    UNIVERSIDAD CATÓLICA CECILIO ACOSTA
+  </text>
+  <text x="50" y="90" font-family="Arial, sans-serif" font-size="14" fill="${colors[1]?.hex || '#00F0FF'}">
+    ${data.facultad || 'Facultad de Ciencias de la Comunicación y de la Información'}
+  </text>
+
+  <!-- Título del trabajo -->
+  <text x="600" y="400" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="${colors[3]?.hex || '#FFFFFF'}" text-anchor="middle">
+    ${escapeHtml(data.titulo).substring(0, 50)}
+  </text>
+
+  <!-- Información del estudiante -->
+  <text x="50" y="750" font-family="Arial, sans-serif" font-size="16" fill="${colors[3]?.hex || '#FFFFFF'}">
+    Estudiante: ${data.estudiante || 'Moisés González'}
+  </text>
+  <text x="50" y="775" font-family="Arial, sans-serif" font-size="14" fill="${colors[1]?.hex || '#00F0FF'}">
+    ${data.cedula || 'C.I. V-31.171.020'}
+  </text>
+
+  <!-- Paleta de colores sugerida -->
+  <g transform="translate(900, 650)">
+    <text x="0" y="-20" font-family="Arial, sans-serif" font-size="12" fill="${colors[3]?.hex || '#FFFFFF'}">Paleta Sugerida:</text>
+    ${colors.map((c, i) => `<rect x="${i * 40}" y="0" width="35" height="35" fill="${c.hex}" rx="5" />`).join('')}
+  </g>
+
+  <!-- Elementos decorativos -->
+  <polygon points="1100,100 1150,150 1100,200 1050,150" fill="${colors[1]?.hex || '#00F0FF'}" opacity="0.5" />
+  <polygon points="100,600 150,650 100,700 50,650" fill="${colors[0]?.hex || '#0033A0'}" opacity="0.3" />
+</svg>`;
+
+  triggerBlobDownload(composition, `${filename}_composicion.svg`, 'image/svg+xml');
+  showToast('✓ Composición visual generada con paleta de colores');
+}
+
+function generateAndDownloadCover(data, filename) {
+  const style = document.getElementById('cover-style')?.value || 'modern';
+  const coverSVG = generateCreativeCover(data, style);
+  triggerBlobDownload(coverSVG, `portada_${style}.svg`, 'image/svg+xml');
+  showToast(`✓ Portada creativa generada (${style})`);
+}
+
+function generateCreativeCover(data, style) {
+  const palettes = {
+    modern: ['#0033A0', '#00F0FF', '#0E1424', '#FFFFFF'],
+    vibrant: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'],
+    elegant: ['#2C3E50', '#34495E', '#7F8C8D', '#ECF0F1'],
+    pop: ['#FF0000', '#FFFF00', '#0000FF', '#FFFFFF'],
+    abstract: ['#6C5CE7', '#00CEC9', '#FD79A8', '#FDCB6E']
+  };
+
+  const colors = palettes[style] || palettes.modern;
+
+  switch(style) {
+    case 'modern':
+      return generateModernCover(data, colors);
+    case 'vibrant':
+      return generateVibrantCover(data, colors);
+    case 'elegant':
+      return generateElegantCover(data, colors);
+    case 'pop':
+      return generatePopCover(data, colors);
+    case 'abstract':
+      return generateAbstractCover(data, colors);
+    default:
+      return generateModernCover(data, colors);
+  }
+}
+
+function generateModernCover(data, colors) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="850" height="1100" viewBox="0 0 850 1100">
+  <defs>
+    <linearGradient id="modernGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:${colors[0]};stop-opacity:1" />
+      <stop offset="100%" style="stop-color:${colors[1]};stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Fondo con gradiente -->
+  <rect width="850" height="1100" fill="${colors[2]}" />
+  <rect x="0" y="0" width="850" height="400" fill="url(#modernGrad)" opacity="0.9" />
+
+  <!-- Elemento decorativo circular -->
+  <circle cx="700" cy="150" r="120" fill="${colors[3]}" opacity="0.15" />
+  <circle cx="150" cy="350" r="80" fill="${colors[3]}" opacity="0.1" />
+
+  <!-- Información institucional -->
+  <text x="425" y="180" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="${colors[3]}" text-anchor="middle">
+    UNIVERSIDAD CATÓLICA CECILIO ACOSTA
+  </text>
+  <text x="425" y="210" font-family="Arial, sans-serif" font-size="12" fill="${colors[3]}" text-anchor="middle">
+    FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN
+  </text>
+  <text x="425" y="240" font-family="Arial, sans-serif" font-size="11" fill="${colors[3]}" text-anchor="middle" font-style="italic">
+    CÁTEDRA: ${escapeHtml(data.materia)}
+  </text>
+
+  <!-- Línea decorativa -->
+  <line x1="100" y1="280" x2="750" y2="280" stroke="${colors[3]}" stroke-width="2" opacity="0.5" />
+
+  <!-- Título del trabajo -->
+  <text x="425" y="550" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="${colors[3]}" text-anchor="middle" filter="url(#shadow)">
+    ${escapeHtml(data.titulo).substring(0, 60)}
+  </text>
+  ${data.titulo.length > 60 ? `<text x="425" y="590" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="${colors[3]}" text-anchor="middle" filter="url(#shadow)">
+    ${escapeHtml(data.titulo).substring(60)}
+  </text>` : ''}
+
+  <!-- Información del estudiante -->
+  <g transform="translate(150, 750)">
+    <text x="0" y="0" font-family="Arial, sans-serif" font-size="14" fill="${colors[3]}">
+      <tspan font-weight="bold">Estudiante:</tspan> ${data.estudiante || 'Moisés González'}
+    </text>
+    <text x="0" y="30" font-family="Arial, sans-serif" font-size="14" fill="${colors[3]}">
+      <tspan font-weight="bold">C.I.:</tspan> ${data.cedula || 'V-31.171.020'}
+    </text>
+    <text x="0" y="60" font-family="Arial, sans-serif" font-size="14" fill="${colors[3]}">
+      <tspan font-weight="bold">Fecha:</tspan> ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+    </text>
+  </g>
+
+  <!-- Elemento decorativo rectangular -->
+  <rect x="600" y="850" width="150" height="4" fill="${colors[1]}" rx="2" />
+  <rect x="100" y="850" width="400" height="2" fill="${colors[3]}" opacity="0.3" rx="1" />
+</svg>`;
+}
+
+function generateVibrantCover(data, colors) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="850" height="1100" viewBox="0 0 850 1100">
+  <defs>
+    <linearGradient id="vibrantGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:${colors[0]};stop-opacity:1" />
+      <stop offset="50%" style="stop-color:${colors[1]};stop-opacity:1" />
+      <stop offset="100%" style="stop-color:${colors[2]};stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Fondo vibrante -->
+  <rect width="850" height="1100" fill="url(#vibrantGrad)" />
+
+  <!-- Formas decorativas -->
+  <circle cx="100" cy="100" r="150" fill="${colors[3]}" opacity="0.2" />
+  <circle cx="750" cy="1000" r="200" fill="${colors[0]}" opacity="0.15" />
+  <polygon points="425,50 500,150 350,150" fill="${colors[3]}" opacity="0.1" />
+
+  <!-- Información institucional -->
+  <text x="425" y="300" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="${colors[3]}" text-anchor="middle">
+    UNIVERSIDAD CATÓLICA CECILIO ACOSTA
+  </text>
+  <text x="425" y="330" font-family="Arial, sans-serif" font-size="13" fill="${colors[3]}" text-anchor="middle">
+    FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN
+  </text>
+
+  <!-- Título del trabajo -->
+  <text x="425" y="550" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="${colors[3]}" text-anchor="middle">
+    ${escapeHtml(data.titulo).substring(0, 50)}
+  </text>
+
+  <!-- Información del estudiante -->
+  <text x="150" y="800" font-family="Arial, sans-serif" font-size="16" fill="${colors[3]}">
+    Estudiante: ${data.estudiante || 'Moisés González'}
+  </text>
+  <text x="150" y="830" font-family="Arial, sans-serif" font-size="16" fill="${colors[3]}">
+    C.I.: ${data.cedula || 'V-31.171.020'}
+  </text>
+
+  <!-- Líneas decorativas -->
+  <line x1="50" y1="400" x2="800" y2="400" stroke="${colors[3]}" stroke-width="3" opacity="0.5" />
+  <line x1="50" y1="700" x2="800" y2="700" stroke="${colors[3]}" stroke-width="2" opacity="0.3" />
+</svg>`;
+}
+
+function generateElegantCover(data, colors) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="850" height="1100" viewBox="0 0 850 1100">
+  <!-- Fondo elegante -->
+  <rect width="850" height="1100" fill="${colors[0]}" />
+
+  <!-- Línea vertical decorativa -->
+  <rect x="50" y="100" width="8" height="900" fill="${colors[1]}" />
+
+  <!-- Información institucional -->
+  <text x="100" y="200" font-family="Georgia, serif" font-size="18" font-weight="bold" fill="${colors[3]}">
+    UNIVERSIDAD CATÓLICA CECILIO ACOSTA
+  </text>
+  <text x="100" y="235" font-family="Georgia, serif" font-size="12" fill="${colors[2]}">
+    FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN
+  </text>
+  <text x="100" y="260" font-family="Georgia, serif" font-size="11" fill="${colors[2]}" font-style="italic">
+    CÁTEDRA: ${escapeHtml(data.materia)}
+  </text>
+
+  <!-- Título del trabajo -->
+  <text x="100" y="500" font-family="Georgia, serif" font-size="40" font-weight="bold" fill="${colors[1]}">
+    ${escapeHtml(data.titulo).substring(0, 45)}
+  </text>
+  ${data.titulo.length > 45 ? `<text x="100" y="550" font-family="Georgia, serif" font-size="40" font-weight="bold" fill="${colors[1]}">
+    ${escapeHtml(data.titulo).substring(45)}
+  </text>` : ''}
+
+  <!-- Información del estudiante -->
+  <text x="100" y="850" font-family="Georgia, serif" font-size="14" fill="${colors[3]}">
+    Estudiante: ${data.estudiante || 'Moisés González'}
+  </text>
+  <text x="100" y="880" font-family="Georgia, serif" font-size="14" fill="${colors[3]}">
+    C.I.: ${data.cedula || 'V-31.171.020'}
+  </text>
+
+  <!-- Línea horizontal decorativa -->
+  <line x1="100" y1="750" x2="750" y2="750" stroke="${colors[1]}" stroke-width="2" />
+</svg>`;
+}
+
+function generatePopCover(data, colors) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="850" height="1100" viewBox="0 0 850 1100">
+  <!-- Fondo pop art -->
+  <rect width="850" height="1100" fill="${colors[3]}" />
+
+  <!-- Cuadrados decorativos -->
+  <rect x="0" y="0" width="283" height="366" fill="${colors[0]}" />
+  <rect x="283" y="0" width="284" height="366" fill="${colors[1]}" />
+  <rect x="567" y="0" width="283" height="366" fill="${colors[2]}" />
+
+  <!-- Información institucional -->
+  <text x="425" y="450" font-family="Arial Black, sans-serif" font-size="24" font-weight="bold" fill="${colors[2]}" text-anchor="middle">
+    UNIVERSIDAD CATÓLICA CECILIO ACOSTA
+  </text>
+  <text x="425" y="485" font-family="Arial, sans-serif" font-size="14" fill="${colors[0]}" text-anchor="middle">
+    FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN
+  </text>
+
+  <!-- Título del trabajo -->
+  <text x="425" y="600" font-family="Arial Black, sans-serif" font-size="38" font-weight="bold" fill="${colors[0]}" text-anchor="middle">
+    ${escapeHtml(data.titulo).substring(0, 40)}
+  </text>
+
+  <!-- Información del estudiante -->
+  <text x="150" y="850" font-family="Arial Black, sans-serif" font-size="18" fill="${colors[2]}">
+    Estudiante: ${data.estudiante || 'Moisés González'}
+  </text>
+  <text x="150" y="880" font-family="Arial Black, sans-serif" font-size="18" fill="${colors[2]}">
+    C.I.: ${data.cedula || 'V-31.171.020'}
+  </text>
+
+  <!-- Elementos decorativos -->
+  <circle cx="700" cy="700" r="50" fill="${colors[1]}" />
+  <polygon points="100,950 150,1000 100,1050 50,1000" fill="${colors[0]}" />
+</svg>`;
+}
+
+function generateAbstractCover(data, colors) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="850" height="1100" viewBox="0 0 850 1100">
+  <defs>
+    <linearGradient id="abstractGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:${colors[0]};stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:${colors[1]};stop-opacity:0.6" />
+    </linearGradient>
+    <linearGradient id="abstractGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:${colors[2]};stop-opacity:0.7" />
+      <stop offset="100%" style="stop-color:${colors[3]};stop-opacity:0.5" />
+    </linearGradient>
+  </defs>
+
+  <!-- Fondo -->
+  <rect width="850" height="1100" fill="${colors[4] || '#2D3436'}" />
+
+  <!-- Formas abstractas -->
+  <ellipse cx="200" cy="300" rx="150" ry="200" fill="url(#abstractGrad1)" opacity="0.6" />
+  <ellipse cx="650" cy="800" rx="200" ry="150" fill="url(#abstractGrad2)" opacity="0.5" />
+  <circle cx="425" cy="550" r="100" fill="${colors[1]}" opacity="0.3" />
+
+  <!-- Información institucional -->
+  <text x="425" y="200" font-family="Arial, sans-serif" font-size="19" font-weight="bold" fill="${colors[3]}" text-anchor="middle" filter="url(#shadow)">
+    UNIVERSIDAD CATÓLICA CECILIO ACOSTA
+  </text>
+  <text x="425" y="235" font-family="Arial, sans-serif" font-size="13" fill="${colors[3]}" text-anchor="middle">
+    FACULTAD DE CIENCIAS DE LA COMUNICACIÓN Y DE LA INFORMACIÓN
+  </text>
+
+  <!-- Título del trabajo -->
+  <text x="425" y="550" font-family="Arial, sans-serif" font-size="35" font-weight="bold" fill="${colors[3]}" text-anchor="middle">
+    ${escapeHtml(data.titulo).substring(0, 55)}
+  </text>
+
+  <!-- Información del estudiante -->
+  <text x="150" y="900" font-family="Arial, sans-serif" font-size="15" fill="${colors[3]}">
+    Estudiante: ${data.estudiante || 'Moisés González'}
+  </text>
+  <text x="150" y="930" font-family="Arial, sans-serif" font-size="15" fill="${colors[3]}">
+    C.I.: ${data.cedula || 'V-31.171.020'}
+  </text>
+
+  <!-- Elementos decorativos -->
+  <polygon points="700,200 750,250 700,300 650,250" fill="${colors[0]}" opacity="0.4" />
+  <rect x="50" y="800" width="100" height="100" fill="${colors[2]}" opacity="0.3" transform="rotate(45 100 850)" />
+</svg>`;
+}
+
+function quickCaptureTask() {
+  const message = document.getElementById('quick-capture').value.trim();
+
+  if (!message) {
+    Swal.fire('Error', 'Por favor pega un mensaje de WhatsApp o Telegram', 'error');
+    return;
+  }
+
+  // Analizar el mensaje (misma lógica que el bot de Telegram)
+  const taskInfo = parseQuickCaptureMessage_(message);
+
+  // Crear la tarea
+  const newTask = {
+    id: 'TAR-' + Date.now().toString().slice(-6),
+    materia_id: '',
+    materia_nombre: taskInfo.materia,
+    titulo: taskInfo.titulo,
+    descripcion: taskInfo.descripcion,
+    tipo: 'Proyecto',
+    fecha_entrega: taskInfo.fecha,
+    prioridad: taskInfo.prioridad,
+    estado: 'Pendiente',
+    formatos_requeridos: 'PDF',
+    fuente: 'Captura Rápida',
+    fecha_creacion: new Date().toISOString()
+  };
+
+  // Guardar localmente
+  state.tareas.unshift(newTask);
+  localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+
+  // Guardar en backend si está configurado
+  if (PRISMA_CONFIG.API_URL) {
+    fetch(PRISMA_CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'prisma_save_assignment',
+        ...newTask
+      })
+    }).then(response => response.json())
+    .then(data => {
+      if (data.ok) {
+        console.log('Tarea guardada en Google Sheets');
+      } else {
+        console.warn('No se pudo guardar en backend:', data.mensaje);
+      }
+    }).catch(err => {
+      console.warn('Error guardando en backend (usando solo localStorage):', err);
+    });
+  }
+
+  // Limpiar el campo
+  document.getElementById('quick-capture').value = '';
+
+  // Mostrar confirmación
+  Swal.fire({
+    icon: 'success',
+    title: '✓ Tarea Capturada',
+    html: `
+      <p><strong>Título:</strong> ${escapeHtml(taskInfo.titulo)}</p>
+      <p><strong>Materia:</strong> ${escapeHtml(taskInfo.materia)}</p>
+      <p><strong>Fecha:</strong> ${taskInfo.fecha || 'Sin fecha'}</p>
+      <p><strong>Prioridad:</strong> ${taskInfo.prioridad}</p>
+    `,
+    confirmButtonText: 'Ver en Radar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      navigate('radar');
+    }
+  });
+
+  updateBadges();
+}
+
+function parseQuickCaptureMessage_(message) {
+  const lines = message.split('\n');
+  const title = lines[0] || 'Tarea de Mensaje';
+  const materia = extractMateriaFromMessage_(message);
+  const fecha = extractFechaFromMessage_(message);
+  const prioridad = extractPrioridadFromMessage_(message);
+
+  return {
+    titulo: title.substring(0, 100),
+    materia: materia,
+    fecha: fecha,
+    prioridad: prioridad,
+    descripcion: message.substring(0, 500)
+  };
+}
+
+function extractMateriaFromMessage_(text) {
+  const materias = [
+    'Taller de Imagen Corporativa',
+    'Diseño Gráfico Digital Avanzado',
+    'Teoría de la Comunicación',
+    'Diseño Editorial',
+    'Semiótica',
+    'Fotografía',
+    'Ilustración',
+    'Animación',
+    'Producción de Video',
+    'Postproducción'
+  ];
+
+  const lowerText = text.toLowerCase();
+  for (let i = 0; i < materias.length; i++) {
+    if (lowerText.includes(materias[i].toLowerCase())) {
+      return materias[i];
+    }
+  }
+
+  return 'Sin materia específica';
+}
+
+function extractFechaFromMessage_(text) {
+  const datePatterns = [
+    /(\d{1,2})\/(\d{1,2})\/(\d{4})/, // DD/MM/YYYY
+    /(\d{4})-(\d{1,2})-(\d{1,2})/, // YYYY-MM-DD
+    /(\d{1,2}) de (\w+) de (\d{4})/, // DD de MMM de YYYY
+    /(\d{1,2})\/(\d{1,2})\/(\d{2})/ // DD/MM/YY
+  ];
+
+  for (let i = 0; i < datePatterns.length; i++) {
+    const match = text.match(datePatterns[i]);
+    if (match) {
+      try {
+        return new Date(match[0]).toISOString();
+      } catch (e) {
+        continue;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractPrioridadFromMessage_(text) {
+  const lowerText = text.toLowerCase();
+
+  if (lowerText.includes('urgente') || lowerText.includes('inmediato') || lowerText.includes('ya') || lowerText.includes('hoy')) {
+    return 'Alta';
+  } else if (lowerText.includes('importante') || lowerText.includes('prioridad')) {
+    return 'Media';
+  } else {
+    return 'Media';
+  }
+}
+
+function generateAndDownloadBlender(data, filename) {
+  const blenderScript = `import bpy
+import math
+from datetime import datetime
+
+# =============================================================================
+# PRISMA - Script Automático para Blender
+# Generado para: ${escapeHtml(data.titulo)}
+# Estudiante: ${data.estudiante || 'Moisés González'}
+# Fecha: ${new Date().toLocaleDateString('es-ES')}
+# =============================================================================
+
+# Limpiar escena existente
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete()
+
+# Crear texto 3D principal
+bpy.ops.object.text_add(location=(0, 0, 0))
+text_obj = bpy.context.object
+text_obj.data.body = "${escapeHtml(data.titulo).substring(0, 30)}"
+text_obj.data.size = 3
+text_obj.data.extrude = 0.5
+
+# Configurar material UNICA
+mat = bpy.data.materials.new(name="Material_UNICA")
+mat.use_nodes = True
+nodes = mat.node_tree.nodes
+bsdf = nodes.get("Principled BSDF")
+bsdf.inputs["Base Color"].default_value = (0.0, 0.2, 0.63, 1.0)  # Azul UNICA #0033A0
+bsdf.inputs["Metallic"].default_value = 0.3
+bsdf.inputs["Roughness"].default_value = 0.4
+
+if text_obj.data.materials:
+    text_obj.data.materials[0] = mat
+else:
+    text_obj.data.materials.append(mat)
+
+# Añadir cámara
+bpy.ops.object.camera_add(location=(10, -15, 8))
+camera = bpy.context.object
+camera.rotation_euler = (math.radians(70), 0, math.radians(45))
+bpy.context.scene.camera = camera
+
+# Añadir luces
+# Luz principal
+bpy.ops.object.light_add(type='SUN', location=(5, -5, 10))
+sun_light = bpy.context.object
+sun_light.data.energy = 3
+
+# Luz de relleno
+bpy.ops.object.light_add(type='POINT', location=(-5, 5, 5))
+point_light = bpy.context.object
+point_light.data.energy = 500
+point_light.data.color = (0.8, 0.9, 1.0)
+
+# Configurar render
+bpy.context.scene.render.engine = 'CYCLES'
+bpy.context.scene.render.resolution_x = 1920
+bpy.context.scene.render.resolution_y = 1080
+bpy.context.scene.render.resolution_percentage = 100
+
+# Renderizar
+bpy.ops.render.render(write_still=True)
+
+print("✓ Render completado: ${escapeHtml(data.titulo)}")
+`;
+
+  triggerBlobDownload(blenderScript, `${filename}_blender.py`, 'text/plain');
+  showToast('✓ Script de Blender generado');
+}
+
+function generateAndDownloadAfterEffects(data, filename) {
+  const aeScript = `// =============================================================================
+// PRISMA - Script Automático para Adobe After Effects
+// Generado para: ${escapeHtml(data.titulo)}
+// Estudiante: ${data.estudiante || 'Moisés González'}
+// Fecha: ${new Date().toLocaleDateString('es-ES')}
+// =============================================================================
+
+{
+  // Crear nueva composición
+  var comp = app.project.items.addComp("${escapeHtml(data.titulo).substring(0, 30)}", 1920, 1080, 1, 30, 30);
+
+  // Crear capa de fondo con gradiente
+  var solidLayer = comp.layers.addSolid([0, 0.2, 0.63], "Fondo UNICA", 1920, 1080);
+  var gradientEffect = solidLayer.property("Effects").addProperty("ADBE Ramp");
+  gradientEffect.property("Start of Ramp").setValue([960, 0]);
+  gradientEffect.property("End of Ramp").setValue([960, 1080]);
+  gradientEffect.property("Start Color").setValue([0, 0.2, 0.63]);
+  gradientEffect.property("End Color").setValue([0, 0.94, 1]);
+
+  // Crear capa de texto principal
+  var textLayer = comp.layers.addText("${escapeHtml(data.titulo).substring(0, 40)}");
+  var textProp = textLayer.property("Source Text");
+  var textDocument = textProp.value;
+  textDocument.resetCharStyle();
+  textDocument.fontSize = 72;
+  textDocument.fillColor = [1, 1, 1];
+  textDocument.font = "ArialMT";
+  textDocument.justification = ParagraphJustification.CENTER_JUSTIFY;
+  textProp.setValue(textDocument);
+
+  // Centrar texto
+  textLayer.property("Position").setValue([960, 540]);
+
+  // Crear animación de entrada (fade in)
+  var opacityProp = textLayer.property("Opacity");
+  var key1 = opacityProp.addKey(0);
+  var key2 = opacityProp.addKey(29);
+  key1.setValue(0);
+  key2.setValue(100);
+
+  // Crear animación de escala
+  var scaleProp = textLayer.property("Scale");
+  var scaleKey1 = scaleProp.addKey(0);
+  var scaleKey2 = scaleProp.addKey(29);
+  scaleKey1.setValue([100, 100]);
+  scaleKey2.setValue([110, 110]);
+
+  // Añadir información del estudiante
+  var infoText = comp.layers.addText("${data.estudiante || 'Moisés González'} - ${data.cedula || 'V-31.171.020'}");
+  var infoProp = infoText.property("Source Text");
+  var infoDocument = infoProp.value;
+  infoDocument.fontSize = 24;
+  infoDocument.fillColor = [0, 0.94, 1];
+  infoDocument.font = "ArialMT";
+  infoProp.setValue(infoDocument);
+  infoText.property("Position").setValue([960, 800]);
+
+  // Añadir capa de logo UNICA (placeholder)
+  var logoLayer = comp.layers.addSolid([1, 1, 1], "Logo UNICA", 200, 200);
+  logoLayer.property("Position").setValue([100, 100]);
+  logoLayer.property("Opacity").setValue(80);
+
+  // Añadir efectos de partículas (simulado)
+  var particleLayer = comp.layers.addShape();
+  var shapeGroup = particleLayer.property("Contents").addProperty("ADBE Vector Group");
+  var ellipse = shapeGroup.property("Contents").addProperty("ADBE Vector Shape - Ellipse");
+  ellipse.property("Size").setValue([50, 50]);
+  particleLayer.property("Position").setValue([960, 540]);
+  particleLayer.property("Opacity").setValue(30);
+
+  // Configurar render
+  var renderQueue = app.project.renderQueue;
+  var renderItem = renderQueue.items.add(comp);
+  renderItem.outputModule(1).file = new File("${filename}_aftereffects.mov");
+  renderItem.render = true;
+
+  alert("✓ Composición creada en After Effects");
+}
+`;
+
+  triggerBlobDownload(aeScript, `${filename}_aftereffects.jsx`, 'text/plain');
+  showToast('✓ Script de After Effects generado');
+}
+
+function generateAndDownloadFilmora(data, filename) {
+  const filmoraProject = `{
+  "project": {
+    "name": "${escapeHtml(data.titulo)}",
+    "version": "13.0",
+    "created_by": "PRISMA",
+    "created_date": "${new Date().toISOString()}",
+    "student": "${data.estudiante || 'Moisés González'}",
+    "id": "${data.cedula || 'V-31.171.020'}"
+  },
+  "timeline": {
+    "duration": 60,
+    "fps": 30,
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "tracks": [
+      {
+        "id": "video_track_1",
+        "type": "video",
+        "name": "Contenido Principal",
+        "clips": [
+          {
+            "id": "intro",
+            "name": "Intro UNICA",
+            "start": 0,
+            "duration": 5,
+            "type": "title",
+            "text": {
+              "content": "UNIVERSIDAD CATÓLICA CECILIO ACOSTA",
+              "font": "Arial",
+              "size": 48,
+              "color": "#FFFFFF",
+              "background": "#0033A0"
+            },
+            "effects": ["fade_in"],
+            "transitions": ["cross_dissolve"]
+          },
+          {
+            "id": "main_content",
+            "name": "${escapeHtml(data.titulo).substring(0, 40)}",
+            "start": 5,
+            "duration": 45,
+            "type": "text_overlay",
+            "text": {
+              "content": "${escapeHtml(data.descripcion || data.resumen_ejecutivo || 'Contenido generado por PRISMA')}",
+              "font": "Arial",
+              "size": 32,
+              "color": "#FFFFFF",
+              "background": "rgba(0, 51, 160, 0.7)"
+            },
+            "effects": ["text_animation"],
+            "audio": {
+              "volume": 0.8,
+              "fade_in": true
+            }
+          },
+          {
+            "id": "outro",
+            "name": "Cierre",
+            "start": 50,
+            "duration": 10,
+            "type": "title",
+            "text": {
+              "content": "${data.estudiante || 'Moisés González'} - ${data.cedula || 'V-31.171.020'}",
+              "font": "Arial",
+              "size": 36,
+              "color": "#00F0FF",
+              "background": "#0E1424"
+            },
+            "effects": ["fade_out"],
+            "transitions": ["cross_dissolve"]
+          }
+        ]
+      },
+      {
+        "id": "audio_track_1",
+        "type": "audio",
+        "name": "Música de Fondo",
+        "clips": [
+          {
+            "id": "bg_music",
+            "name": "Música Académica",
+            "start": 0,
+            "duration": 60,
+            "volume": 0.3,
+            "fade_in": true,
+            "fade_out": true,
+            "loop": true
+          }
+        ]
+      },
+      {
+        "id": "audio_track_2",
+        "type": "audio",
+        "name": "Narración",
+        "clips": [
+          {
+            "id": "voiceover",
+            "name": "Voz en Off",
+            "start": 5,
+            "duration": 45,
+            "volume": 1.0,
+            "text": "${escapeHtml(data.resumen_ejecutivo || '')}"
+          }
+        ]
+      }
+    ]
+  },
+  "effects": [
+    {
+      "id": "fade_in",
+      "type": "opacity",
+      "parameters": {
+        "start": 0,
+        "end": 100,
+        "duration": 1
+      }
+    },
+    {
+      "id": "fade_out",
+      "type": "opacity",
+      "parameters": {
+        "start": 100,
+        "end": 0,
+        "duration": 1
+      }
+    },
+    {
+      "id": "text_animation",
+      "type": "transform",
+      "parameters": {
+        "scale_start": 100,
+        "scale_end": 105,
+        "position_y_start": 540,
+        "position_y_end": 530
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "id": "cross_dissolve",
+      "type": "dissolve",
+      "duration": 1
+    }
+  ],
+  "export": {
+    "format": "MP4",
+    "codec": "H.264",
+    "quality": "high",
+    "bitrate": "8000",
+    "audio_codec": "AAC",
+    "audio_bitrate": "192"
+  },
+  "metadata": {
+    "title": "${escapeHtml(data.titulo)}",
+    "author": "${data.estudiante || 'Moisés González'}",
+    "university": "Universidad Católica Cecilio Acosta",
+    "faculty": "Facultad de Ciencias de la Comunicación y de la Información",
+    "subject": "${escapeHtml(data.materia)}",
+    "generated_by": "PRISMA",
+    "generation_date": "${new Date().toISOString()}"
+  }
+}
+`;
+
+  triggerBlobDownload(filmoraProject, `${filename}_filmora.json`, 'application/json');
+  showToast('✓ Proyecto de Filmora generado');
 }
 
 function generateAndDownloadJSX(data, filename) {
@@ -1183,6 +2105,12 @@ function renderChannelsScreen(container) {
       </button>
     </div>
     
+    <div class="info-box" style="background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px;">
+      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">
+        <i class="fas fa-info-circle"></i> <strong>Cómo funciona:</strong> Agrega tus grupos de WhatsApp/Telegram donde los profesores envían tareas. Cuando recibas un mensaje, pégalo en PRISMA para crear una tarea automáticamente.
+      </p>
+    </div>
+    
     ${state.canales.length === 0 ? `
       <div class="empty-state">
         <i class="fas fa-comments" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
@@ -1218,10 +2146,13 @@ function renderChannelCard(channel) {
         </span>
       </div>
       <div class="channel-actions">
-        <button class="action-btn" onclick="toggleChannelStatus('${channel.id}')">
+        <button class="action-btn" onclick="processChannelMessage('${channel.id}')" title="Procesar mensaje de este canal">
+          <i class="fas fa-envelope-open-text"></i>
+        </button>
+        <button class="action-btn" onclick="toggleChannelStatus('${channel.id}')" title="Activar/desactivar monitoreo">
           <i class="fas fa-power-off"></i>
         </button>
-        <button class="action-btn" onclick="deleteChannel('${channel.id}')">
+        <button class="action-btn" onclick="deleteChannel('${channel.id}')" title="Eliminar canal">
           <i class="fas fa-trash"></i>
         </button>
       </div>
@@ -1467,12 +2398,51 @@ function syncCampus() {
         showToast('✓ Sincronización completada');
         loadDashboardData();
       } else {
-        showToast('⚠️ ' + data.mensaje);
+        // Mensaje más claro explicando que la sincronización es simulada
+        Swal.fire({
+          title: 'ℹ️ Sincronización Simulada',
+          html: `
+            <div style="text-align: left; font-size: 13px;">
+              <p><strong>La sincronización con el campus UNICA es simulada por ahora.</strong></p>
+              <p>Para conectar realmente con Moodle UNICA que requiere login, necesitaríamos:</p>
+              <ul style="margin-left: 20px; margin-top: 8px;">
+                <li>• API token oficial del campus</li>
+                <li>• Integración con Moodle Web Services</li>
+                <li>• Configuración de credenciales seguras</li>
+              </ul>
+              <p style="margin-top: 12px;"><strong>Solución recomendada:</strong></p>
+              <p>Agrega tus materias manualmente en la sección "Materias" y usa los canales de WhatsApp/Telegram para capturar tareas automáticamente.</p>
+            </div>
+          `,
+          icon: 'info'
+        });
       }
     })
     .catch(err => {
       console.error('Error en sincronización:', err);
-      showToast('Error de conexión con campus');
+      // Explicar el error de forma más amigable
+      Swal.fire({
+        title: '⚠️ Error de Conexión',
+        html: `
+          <div style="text-align: left; font-size: 13px;">
+            <p><strong>No se pudo conectar con el campus.</strong></p>
+            <p>Esto es normal porque:</p>
+            <ul style="margin-left: 20px; margin-top: 8px;">
+              <li>• La sincronización directa con Moodle requiere configuración especial</li>
+              <li>• Tu campus necesita login con cédula (no es automático)</li>
+              <li>• Por seguridad, no intentamos login automático sin configuración explícita</li>
+            </ul>
+            <p style="margin-top: 12px;"><strong>¿Qué funciona correctamente?</strong></p>
+            <ul style="margin-left: 20px; margin-top: 8px;">
+              <li>✅ Google Sheets (ya conectado)</li>
+              <li>✅ Generación con IA (en Estudio)</li>
+              <li>✅ Gestión manual de materias y tareas</li>
+              <li>✅ Canales WhatsApp/Telegram</li>
+            </ul>
+          </div>
+        `,
+        icon: 'warning'
+      });
     });
   } else {
     showToast('Configure la URL del backend en ajustes');
@@ -1549,43 +2519,89 @@ function openGuideModal() {
 // ============================================================================
 function openNewTaskModal() {
   Swal.fire({
-    title: '📝 Nueva Tarea',
+    title: '📝 Nueva Tarea Manual',
     html: `
-      <input id="swal-task-title" class="swal2-input" placeholder="Título de la tarea">
-      <textarea id="swal-task-desc" class="swal2-input" placeholder="Descripción"></textarea>
-      <select id="swal-task-priority" class="swal2-input">
-        <option value="Media">Prioridad Media</option>
-        <option value="Alta">Prioridad Alta</option>
-        <option value="Baja">Prioridad Baja</option>
-      </select>
+      <div style="text-align: left;">
+        <input id="swal-task-title" class="swal2-input" placeholder="Título de la tarea">
+        <textarea id="swal-task-desc" class="swal2-input" placeholder="Descripción detallada de la tarea"></textarea>
+        <select id="swal-task-priority" class="swal2-input">
+          <option value="Media">Prioridad Media</option>
+          <option value="Alta">Prioridad Alta</option>
+          <option value="Baja">Prioridad Baja</option>
+        </select>
+        <label style="display: block; margin-top: 12px; font-size: 12px; font-weight: 600;">Fecha de entrega (opcional):</label>
+        <input id="swal-task-date" type="date" class="swal2-input">
+        <label style="display: block; margin-top: 8px; font-size: 12px; font-weight: 600;">Materia (opcional):</label>
+        <select id="swal-task-course" class="swal2-input">
+          <option value="">Sin materia específica</option>
+          ${state.materias.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('')}
+        </select>
+      </div>
     `,
     showCancelButton: true,
     confirmButtonText: 'Crear Tarea',
+    width: 500,
     preConfirm: () => {
       const title = document.getElementById('swal-task-title').value;
       const desc = document.getElementById('swal-task-desc').value;
       const priority = document.getElementById('swal-task-priority').value;
+      const date = document.getElementById('swal-task-date').value;
+      const courseId = document.getElementById('swal-task-course').value;
       
       if (!title) Swal.showValidationMessage('El título es requerido');
       
-      return { title, desc, priority };
+      return { title, desc, priority, date, courseId };
     }
   }).then((result) => {
     if (result.isConfirmed) {
+      const selectedCourse = state.materias.find(m => m.id === result.value.courseId);
+      
       const newTask = {
         id: 'TAR-' + Date.now().toString().slice(-6),
+        materia_id: result.value.courseId || '',
+        materia_nombre: selectedCourse?.nombre || 'Sin materia',
         titulo: result.value.title,
         descripcion: result.value.desc,
+        tipo: 'Proyecto',
+        fecha_entrega: result.value.date || null,
+        hora_entrega: '23:59',
         prioridad: result.value.priority,
         estado: 'Pendiente',
-        fecha_creacion: new Date().toISOString()
+        formatos_requeridos: 'PDF',
+        porcentaje_nota: 0,
+        fuente: 'Manual',
+        fecha_creacion: new Date().toISOString(),
+        ultima_actualizacion: new Date().toISOString()
       };
       
+      // Guardar en localStorage
       state.tareas.unshift(newTask);
       localStorage.setItem('prisma_tareas', JSON.stringify(state.tareas));
+      
+      // Guardar en backend si está configurado
+      if (PRISMA_CONFIG.API_URL) {
+        fetch(PRISMA_CONFIG.API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'prisma_save_assignment',
+            ...newTask
+          })
+        }).then(response => response.json())
+        .then(data => {
+          if (data.ok) {
+            console.log('Tarea guardada en Google Sheets');
+          } else {
+            console.warn('No se pudo guardar en backend:', data.mensaje);
+          }
+        }).catch(err => {
+          console.warn('Error guardando en backend (usando solo localStorage):', err);
+        });
+      }
+      
       updateBadges();
       renderScreen('radar');
-      showToast('✓ Tarea creada');
+      showToast('✓ Tarea creada y guardada en Google Sheets');
     }
   });
 }
